@@ -1,0 +1,411 @@
+import React, { useEffect, useState } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  ActivityIndicator
+} from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
+import { useNavigation } from "@react-navigation/native";
+
+import { useDocument } from "../context/DocumentContext";
+import { useSettings } from "../context/SettingsContext";
+import { fetchChunk } from "../api";
+import ErrorBanner from "../components/ErrorBanner";
+import ChunkProgress from "../components/ChunkProgress";
+import { getTranslation } from "../utils/translations";
+
+export default function ReaderScreen() {
+  const {
+    docId,
+    chunkCount,
+    currentChunkIndex,
+    chunksCache,
+    setChunkInCache,
+    setCurrentChunkIndex
+  } = useDocument();
+  const { getTextSizeStyle, language } = useSettings();
+  const navigation = useNavigation();
+  const t = (key) => getTranslation(key, language);
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [isOriginalExpanded, setIsOriginalExpanded] = useState(false);
+
+  const cached = chunksCache[currentChunkIndex];
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      if (!docId || chunkCount == null) return;
+      // If chunk is already cached, don't reload
+      if (chunksCache[currentChunkIndex]) return;
+      
+      // Always try to load/refresh the chunk when currentChunkIndex changes
+      // This ensures we have the latest data, especially when navigating to a new chunk
+      
+      setError("");
+      setLoading(true);
+      try {
+        const data = await fetchChunk(docId, currentChunkIndex);
+        if (cancelled) return;
+        setChunkInCache(currentChunkIndex, data);
+      } catch (e) {
+        if (cancelled) return;
+        setError(e.message || "Failed to load chunk.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [docId, chunkCount, currentChunkIndex, setChunkInCache, chunksCache]);
+
+  // Reset expanded state when chunk changes
+  useEffect(() => {
+    setIsOriginalExpanded(false);
+  }, [currentChunkIndex]);
+
+  const onNextChunk = () => {
+    if (!cached || !chunkCount) return;
+    
+    // Navigate to next chunk if available
+    if (currentChunkIndex + 1 < chunkCount) {
+      setCurrentChunkIndex(currentChunkIndex + 1);
+      // Navigation will happen automatically via useEffect when currentChunkIndex changes
+    } else {
+      // All chunks completed - navigate to Done screen
+      navigation.reset({
+        index: 0,
+        routes: [{ name: "Done" }]
+      });
+    }
+  };
+
+  // Check if we have enough data to show the button
+  // Enable button as soon as we have chunk data (even if EasyRead is still generating)
+  // The button should work even if EasyRead is being generated in the background
+  const canShowButton = !!(cached && cached.originalText);
+
+  if (!docId || chunkCount == null) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.header}>{t("noDocumentLoaded")}</Text>
+        <Text style={styles.body}>
+          {t("goBackAndImport")}
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <ChunkProgress current={currentChunkIndex} total={chunkCount} />
+      <ErrorBanner message={error} />
+
+      {loading && !cached && (
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color="#2563EB" />
+          <Text style={styles.loadingText}>{t("loadingChunk")}</Text>
+        </View>
+      )}
+
+      {cached && (
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+        >
+          <View style={styles.card}>
+            {/* Original Text Section */}
+            <View style={styles.originalSection}>
+              <TouchableOpacity
+                style={styles.sectionHeader}
+                onPress={() => setIsOriginalExpanded(!isOriginalExpanded)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.sectionIcon}>📄</Text>
+                <Text style={styles.sectionTitle}>{t("originalText")}</Text>
+                <View style={styles.expandButton}>
+                  <Text style={styles.expandIcon}>
+                    {isOriginalExpanded ? "▼" : "▶"}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+              {isOriginalExpanded && (
+                <ScrollView style={styles.originalContent} nestedScrollEnabled>
+                  <Text style={[styles.originalText, getTextSizeStyle()]}>
+                    {cached.originalText}
+                  </Text>
+                </ScrollView>
+              )}
+              {!isOriginalExpanded && (
+                <View style={styles.collapsedPreview}>
+                  <Text style={[styles.previewText, getTextSizeStyle()]} numberOfLines={2}>
+                    {cached.originalText}
+                  </Text>
+                  <Text style={styles.expandHint}>{t("tapToViewFull")}</Text>
+                </View>
+              )}
+            </View>
+
+            {/* Simple Summary Section */}
+            <LinearGradient
+              colors={["#FF8C69", "#FF6B4A"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0, y: 1 }}
+              style={styles.summarySection}
+            >
+              <View style={styles.sectionHeader}>
+                <Text style={styles.summaryIcon}>⚖</Text>
+                <Text style={styles.summaryTitle}>{t("simpleSummary")}</Text>
+              </View>
+              <View style={styles.summaryContent}>
+                {!cached.easyread && loading ? (
+                  <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="small" color="white" />
+                    <Text style={styles.loadingSummaryText}>{t("generatingEasyRead")}</Text>
+                  </View>
+                ) : cached.easyread?.sentences?.length > 0 ? (
+                  <>
+                    {cached.easyread.sentences.map((s, idx) => (
+                      <View key={idx.toString()} style={styles.bulletItem}>
+                        <View style={styles.bullet} />
+                        <Text style={[styles.summaryText, getTextSizeStyle()]}>
+                          {s}
+                        </Text>
+                      </View>
+                    ))}
+                    
+                    {cached.easyread?.keyTerms?.length ? (
+                      <View style={styles.keyTermsContainer}>
+                        {cached.easyread.keyTerms.map((t, idx) => (
+                          <Text key={idx.toString()} style={[styles.keyTermInline, getTextSizeStyle()]}>
+                            ({t.term}: {t.definition})
+                          </Text>
+                        ))}
+                      </View>
+                    ) : null}
+                  </>
+                ) : (
+                  <Text style={styles.noSummaryText}>
+                    {t("willBeGenerated")}
+                  </Text>
+                )}
+              </View>
+            </LinearGradient>
+
+            {/* Action Button */}
+            <TouchableOpacity
+              style={[
+                styles.actionButton,
+                !canShowButton && styles.actionButtonDisabled
+              ]}
+              disabled={!canShowButton}
+              onPress={onNextChunk}
+            >
+              <Text style={styles.actionButtonText}>
+                {currentChunkIndex + 1 < chunkCount ? t("nextChunk") : t("finishReading")}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      )}
+
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    padding: 16,
+    paddingTop: 24,
+    backgroundColor: "#1E293B"
+  },
+  header: {
+    fontSize: 20,
+    fontWeight: "700",
+    marginBottom: 8,
+    color: "#111827"
+  },
+  body: {
+    fontSize: 14,
+    color: "#4B5563"
+  },
+  scroll: {
+    flex: 1
+  },
+  scrollContent: {
+    padding: 16,
+    paddingBottom: 32
+  },
+  card: {
+    backgroundColor: "transparent",
+    borderRadius: 16,
+    overflow: "hidden"
+  },
+  originalSection: {
+    backgroundColor: "#FAF9F6",
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    padding: 20,
+    paddingBottom: 16
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12
+  },
+  expandButton: {
+    marginLeft: "auto"
+  },
+  expandIcon: {
+    fontSize: 12,
+    color: "#9CA3AF",
+    fontWeight: "600"
+  },
+  sectionIcon: {
+    fontSize: 18,
+    marginRight: 8
+  },
+  sectionTitle: {
+    fontSize: 11,
+    fontWeight: "600",
+    letterSpacing: 1,
+    color: "#9CA3AF",
+    textTransform: "uppercase"
+  },
+  originalContent: {
+    maxHeight: 300
+  },
+  originalText: {
+    fontSize: 15,
+    lineHeight: 24,
+    color: "#1F2937",
+    fontFamily: "serif"
+  },
+  collapsedPreview: {
+    paddingTop: 8
+  },
+  previewText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: "#6B7280",
+    fontStyle: "italic",
+    marginBottom: 8
+  },
+  expandHint: {
+    fontSize: 12,
+    color: "#9CA3AF",
+    fontStyle: "italic"
+  },
+  summarySection: {
+    padding: 20,
+    paddingBottom: 24,
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16
+  },
+  summaryIcon: {
+    fontSize: 18,
+    marginRight: 8
+  },
+  summaryTitle: {
+    fontSize: 11,
+    fontWeight: "600",
+    letterSpacing: 1,
+    color: "white",
+    textTransform: "uppercase"
+  },
+  summaryContent: {
+    marginTop: 8
+  },
+  bulletItem: {
+    flexDirection: "row",
+    marginBottom: 12,
+    alignItems: "flex-start"
+  },
+  bullet: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#FF8C69",
+    marginTop: 8,
+    marginRight: 12
+  },
+  summaryText: {
+    flex: 1,
+    fontSize: 15,
+    lineHeight: 22,
+    color: "white"
+  },
+  keyTermsContainer: {
+    marginTop: 8,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255, 255, 255, 0.2)"
+  },
+  keyTermInline: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: "white",
+    marginBottom: 6
+  },
+  actionButton: {
+    backgroundColor: "white",
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: "#FF6B4A",
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    alignItems: "center",
+    marginTop: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3
+  },
+  actionButtonDisabled: {
+    opacity: 0.5
+  },
+  actionButtonText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#FF6B4A"
+  },
+  center: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  loadingText: {
+    marginTop: 8,
+    color: "#E2E8F0"
+  },
+  loadingContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 20
+  },
+  loadingSummaryText: {
+    marginLeft: 8,
+    color: "white",
+    fontSize: 14
+  },
+  noSummaryText: {
+    color: "rgba(255, 255, 255, 0.7)",
+    fontSize: 14,
+    fontStyle: "italic",
+    textAlign: "center",
+    paddingVertical: 20
+  }
+});
+
