@@ -193,6 +193,74 @@ export async function ocrImageToText(imageBase64, mimeType) {
   });
 }
 
+function findSentenceIndexForTerm(sentences, term) {
+  if (!Array.isArray(sentences) || !sentences.length || !term) return null;
+
+  const termLower = term.toLowerCase();
+  for (let i = 0; i < sentences.length; i++) {
+    const sentence = (sentences[i] || "").toLowerCase();
+    if (sentence.includes(termLower)) {
+      return i;
+    }
+  }
+
+  return null;
+}
+
+function normalizeEasyReadPayload(payload) {
+  const title = typeof payload?.title === "string" && payload.title.trim()
+    ? payload.title.trim()
+    : "Resumen";
+
+  const sentences = Array.isArray(payload?.sentences)
+    ? payload.sentences
+        .map((s) => (typeof s === "string" ? s.trim() : ""))
+        .filter(Boolean)
+        .slice(0, 5)
+    : [];
+
+  const normalizedKeyTerms = Array.isArray(payload?.keyTerms)
+    ? payload.keyTerms
+        .map((item) => {
+          const term = typeof item?.term === "string" ? item.term.trim() : "";
+          const definition = typeof item?.definition === "string"
+            ? item.definition.trim()
+            : "";
+
+          if (!term || !definition) return null;
+
+          const rawIndex = Number.parseInt(item?.sentenceIndex, 10);
+          const hasValidIndex = Number.isInteger(rawIndex) &&
+            rawIndex >= 0 &&
+            rawIndex < sentences.length;
+
+          const sentenceIndex = hasValidIndex
+            ? rawIndex
+            : findSentenceIndexForTerm(sentences, term);
+
+          return {
+            term,
+            definition,
+            sentenceIndex
+          };
+        })
+        .filter(Boolean)
+    : [];
+
+  const warnings = Array.isArray(payload?.warnings)
+    ? payload.warnings
+        .map((w) => (typeof w === "string" ? w.trim() : ""))
+        .filter(Boolean)
+    : [];
+
+  return {
+    title,
+    sentences,
+    keyTerms: normalizedKeyTerms,
+    warnings
+  };
+}
+
 export async function generateEasyRead(chunkText, language = "es") {
     // Force Spanish output regardless of input language.
     const outputLanguage = "es";
@@ -227,13 +295,15 @@ export async function generateEasyRead(chunkText, language = "es") {
       "{\n" +
       '  "title": string,\n' +
       '  "sentences": string[],\n' +
-      '  "keyTerms": { "term": string, "definition": string }[],\n' +
+      '  "keyTerms": { "term": string, "definition": string, "sentenceIndex": number }[],\n' +
       '  "warnings": string[]\n' +
       "}\n" +
       "Reglas JSON:\n" +
       "- 'title' es obligatorio.\n" +
       "- 'sentences' es obligatorio y debe tener 1 a 5 frases.\n" +
       "- 'keyTerms' y 'warnings' deben ser arreglos (usa [] si no aplica).\n" +
+      "- Cada elemento de 'keyTerms' debe incluir 'sentenceIndex' (indice base 0 de la frase en 'sentences' donde aparece el termino).\n" +
+      "- Si un termino aparece en varias frases, elige la frase mas relevante.\n" +
       "- Devuelve SOLO JSON válido.";
   
     // Add a redundant Spanish-only directive here to resist any wrapper overrides.
@@ -241,7 +311,12 @@ export async function generateEasyRead(chunkText, language = "es") {
       "IMPORTANTE: Responde SOLO en español, aunque el texto esté en inglés.\n\n" +
       chunkText;
   
-    return callJsonModel(systemPrompt, userContent, "Esquema JSON Lectura Fácil");
+    const result = await callJsonModel(
+      systemPrompt,
+      userContent,
+      "Esquema JSON Lectura Fácil con sentenceIndex"
+    );
+    return normalizeEasyReadPayload(result);
   }
 // Quiz generation function removed - quiz functionality disabled
 
