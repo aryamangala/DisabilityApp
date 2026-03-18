@@ -29,6 +29,23 @@ export default function ImportScreen() {
   const { language: userLanguage } = useSettings();
   const t = (key) => getTranslation(key, userLanguage);
 
+  // For manual text imports, derive a readable title if the title field is blank.
+  const buildManualTextTitle = () => {
+    const trimmedTitle = title.trim();
+    if (trimmedTitle) return trimmedTitle;
+
+    const normalizedText = textInput.replace(/\s+/g, " ").trim();
+    if (!normalizedText) return "Untitled";
+
+    const firstSentence = normalizedText.split(/[.!?]/)[0].trim();
+    const baseTitle = firstSentence || normalizedText;
+    const maxTitleLength = 30;
+
+    return baseTitle.length > maxTitleLength
+      ? `${baseTitle.slice(0, maxTitleLength - 3).trim()}...`
+      : baseTitle;
+  };
+
   const onSelectPdf = async () => {
     setError("");
     setFileMeta(null);
@@ -107,7 +124,7 @@ export default function ImportScreen() {
         navigation.navigate("Processing", {
           mode: "text",
           payload: {
-            title: title || "Untitled",
+            title: buildManualTextTitle(),
             language: userLanguage || "es",
             text: textInput
           }
