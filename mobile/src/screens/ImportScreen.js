@@ -428,7 +428,7 @@ const styles = StyleSheet.create({
   },
   iconText: {
     fontSize: 28,
-    color: "white"
+    color: "#1F2937"
   },
   iconTextT: {
     fontSize: 32,
@@ -446,7 +446,7 @@ const styles = StyleSheet.create({
   },
   optionSubtitle: {
     fontSize: 14,
-    color: "#6B7280"
+    color: "#475467"
   },
   inputSection: {
     marginTop: 8
@@ -487,7 +487,7 @@ const styles = StyleSheet.create({
     borderColor: "#D1D5DB"
   },
   primaryButton: {
-    backgroundColor: "#FF6B4A",
+    backgroundColor: "#B42318",
     borderRadius: 12,
     paddingVertical: 18,
     paddingHorizontal: 20,

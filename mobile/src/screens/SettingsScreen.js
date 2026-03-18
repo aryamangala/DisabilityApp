@@ -196,8 +196,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#F5F1E8"
   },
   optionButtonActive: {
-    borderColor: "#FF6B4A",
-    backgroundColor: "#FFE5DD"
+    borderColor: "#8F2D12",
+    backgroundColor: "#FBE4DD"
   },
   optionText: {
     fontSize: 14,
@@ -205,11 +205,11 @@ const styles = StyleSheet.create({
     color: "#2C2C2C"
   },
   optionTextActive: {
-    color: "#FF6B4A"
+    color: "#8F2D12"
   },
   checkmark: {
     fontSize: 18,
-    color: "#FF6B4A",
+    color: "#8F2D12",
     fontWeight: "700"
   },
   previewContainer: {
@@ -223,7 +223,7 @@ const styles = StyleSheet.create({
   previewLabel: {
     fontSize: 12,
     fontWeight: "600",
-    color: "#6B7280",
+    color: "#5B6473",
     marginBottom: 8
   },
   previewText: {

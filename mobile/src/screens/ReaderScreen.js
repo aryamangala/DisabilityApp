@@ -286,7 +286,7 @@ export default function ReaderScreen() {
 
             {/* Simple Summary Section */}
             <LinearGradient
-              colors={["#FF8C69", "#FF6B4A"]}
+              colors={["#B42318", "#8F2D12"]}
               start={{ x: 0, y: 0 }}
               end={{ x: 0, y: 1 }}
               style={styles.summarySection}
@@ -382,11 +382,11 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: "700",
     marginBottom: 8,
-    color: "#111827"
+    color: "#F8FAFC"
   },
   body: {
     fontSize: 14,
-    color: "#4B5563"
+    color: "#E2E8F0"
   },
   scroll: {
     flex: 1
@@ -417,7 +417,7 @@ const styles = StyleSheet.create({
   },
   expandIcon: {
     fontSize: 12,
-    color: "#9CA3AF",
+    color: "#5B6473",
     fontWeight: "600"
   },
   sectionIcon: {
@@ -428,7 +428,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "600",
     letterSpacing: 1,
-    color: "#9CA3AF",
+    color: "#5B6473",
     textTransform: "uppercase"
   },
   originalContent: {
@@ -452,7 +452,7 @@ const styles = StyleSheet.create({
   },
   expandHint: {
     fontSize: 12,
-    color: "#9CA3AF",
+    color: "#5B6473",
     fontStyle: "italic"
   },
   summarySection: {
@@ -484,7 +484,7 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: "#FF8C69",
+    backgroundColor: "#FEC4B4",
     marginTop: 8,
     marginRight: 12
   },
@@ -503,7 +503,7 @@ const styles = StyleSheet.create({
   },
   termHintText: {
     marginTop: 8,
-    color: "rgba(255, 255, 255, 0.9)",
+    color: "rgba(255, 255, 255, 0.95)",
     fontSize: 13,
     fontStyle: "italic"
   },
@@ -535,7 +535,7 @@ const styles = StyleSheet.create({
   termCardButton: {
     alignSelf: "flex-start",
     marginTop: 10,
-    backgroundColor: "#FF6B4A",
+    backgroundColor: "#8F2D12",
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 8
@@ -549,7 +549,7 @@ const styles = StyleSheet.create({
     backgroundColor: "white",
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: "#FF6B4A",
+    borderColor: "#8F2D12",
     paddingVertical: 16,
     paddingHorizontal: 24,
     alignItems: "center",
@@ -566,7 +566,7 @@ const styles = StyleSheet.create({
   actionButtonText: {
     fontSize: 16,
     fontWeight: "600",
-    color: "#FF6B4A"
+    color: "#8F2D12"
   },
   center: {
     flex: 1,
@@ -589,7 +589,7 @@ const styles = StyleSheet.create({
     fontSize: 14
   },
   noSummaryText: {
-    color: "rgba(255, 255, 255, 0.7)",
+    color: "rgba(255, 255, 255, 0.92)",
     fontSize: 14,
     fontStyle: "italic",
     textAlign: "center",

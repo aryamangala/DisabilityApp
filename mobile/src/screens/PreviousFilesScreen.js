@@ -405,7 +405,7 @@ const styles = StyleSheet.create({
   },
   emptySubtext: {
     fontSize: 14,
-    color: "#9CA3AF"
+    color: "#5B6473"
   },
   scroll: {
     flex: 1
@@ -467,7 +467,7 @@ const styles = StyleSheet.create({
   },
   expandIcon: {
     fontSize: 14,
-    color: "#6B7280",
+    color: "#475467",
     marginLeft: 12
   },
   chunksContainer: {
@@ -501,7 +501,7 @@ const styles = StyleSheet.create({
   completedBadge: {
     fontSize: 11,
     fontWeight: "600",
-    color: "#15803D",
+    color: "#166534",
     backgroundColor: "#D1FAE5",
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -510,7 +510,7 @@ const styles = StyleSheet.create({
   incompleteBadge: {
     fontSize: 11,
     fontWeight: "600",
-    color: "#6B7280",
+    color: "#4B5563",
     backgroundColor: "#F3F4F6",
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -519,7 +519,7 @@ const styles = StyleSheet.create({
   attemptsBadge: {
     fontSize: 11,
     fontWeight: "600",
-    color: "#2563EB",
+    color: "#1D4ED8",
     backgroundColor: "#DBEAFE",
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -546,7 +546,7 @@ const styles = StyleSheet.create({
   },
   bullet: {
     fontSize: 16,
-    color: "#FF6B4A",
+    color: "#8F2D12",
     marginRight: 8,
     marginTop: 2
   },
@@ -580,12 +580,12 @@ const styles = StyleSheet.create({
   },
   warningText: {
     fontSize: 13,
-    color: "#DC2626",
+    color: "#B42318",
     marginBottom: 6,
     lineHeight: 18
   },
   resumeButton: {
-    backgroundColor: "#FF6B4A",
+    backgroundColor: "#B42318",
     borderRadius: 12,
     padding: 14,
     alignItems: "center",
@@ -609,6 +609,6 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 8,
     fontSize: 12,
-    color: "#6B7280"
+    color: "#5B6473"
   }
 });
