@@ -17,6 +17,71 @@ import ErrorBanner from "../components/ErrorBanner";
 import ChunkProgress from "../components/ChunkProgress";
 import { getTranslation } from "../utils/translations";
 
+function isWordChar(char) {
+  return /[A-Za-z0-9\u00C0-\u017F_]/.test(char);
+}
+
+function getNonOverlappingTermMatches(sentence, keyTerms, sentenceIndex) {
+  if (!sentence || !Array.isArray(keyTerms) || keyTerms.length === 0) {
+    return [];
+  }
+
+  const termsForSentence = keyTerms.filter((item) => {
+    const hasIndexedSentence = Number.isInteger(item?.sentenceIndex);
+    if (!hasIndexedSentence) return true;
+    return item.sentenceIndex === sentenceIndex;
+  });
+
+  if (!termsForSentence.length) {
+    return [];
+  }
+
+  const sentenceLower = sentence.toLowerCase();
+  const rawMatches = [];
+
+  termsForSentence.forEach((item) => {
+    const term = (item?.term || "").trim();
+    const definition = (item?.definition || "").trim();
+    if (!term) return;
+
+    const termLower = term.toLowerCase();
+    let searchStart = 0;
+
+    while (searchStart < sentenceLower.length) {
+      const start = sentenceLower.indexOf(termLower, searchStart);
+      if (start === -1) break;
+
+      const end = start + termLower.length;
+      const beforeChar = start > 0 ? sentence[start - 1] : " ";
+      const afterChar = end < sentence.length ? sentence[end] : " ";
+      const hasWordBoundary = !isWordChar(beforeChar) && !isWordChar(afterChar);
+
+      if (hasWordBoundary) {
+        rawMatches.push({ start, end, term, definition });
+      }
+
+      searchStart = end;
+    }
+  });
+
+  rawMatches.sort((a, b) => {
+    if (a.start !== b.start) return a.start - b.start;
+    return (b.end - b.start) - (a.end - a.start);
+  });
+
+  const filtered = [];
+  let lastEnd = -1;
+
+  rawMatches.forEach((match) => {
+    if (match.start >= lastEnd) {
+      filtered.push(match);
+      lastEnd = match.end;
+    }
+  });
+
+  return filtered;
+}
+
 export default function ReaderScreen() {
   const {
     docId,
@@ -33,6 +98,7 @@ export default function ReaderScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [isOriginalExpanded, setIsOriginalExpanded] = useState(false);
+  const [selectedKeyTerm, setSelectedKeyTerm] = useState(null);
 
   const cached = chunksCache[currentChunkIndex];
 
@@ -71,7 +137,70 @@ export default function ReaderScreen() {
   // Reset expanded state when chunk changes
   useEffect(() => {
     setIsOriginalExpanded(false);
+    setSelectedKeyTerm(null);
   }, [currentChunkIndex]);
+
+  const onKeyTermPress = ({ term, definition, sentenceIndex }) => {
+    setSelectedKeyTerm((prev) => {
+      const isSameTerm =
+        prev &&
+        prev.term === term &&
+        prev.definition === definition &&
+        prev.sentenceIndex === sentenceIndex;
+
+      if (isSameTerm) {
+        return null;
+      }
+
+      return { term, definition, sentenceIndex };
+    });
+  };
+
+  const renderSentenceWithHighlights = (sentence, sentenceIndex) => {
+    const keyTerms = cached?.easyread?.keyTerms || [];
+    const matches = getNonOverlappingTermMatches(sentence, keyTerms, sentenceIndex);
+
+    if (!matches.length) return sentence;
+
+    const parts = [];
+    let cursor = 0;
+
+    matches.forEach((match, idx) => {
+      if (match.start > cursor) {
+        parts.push(
+          <Text key={`plain-${idx}-${cursor}`}>
+            {sentence.slice(cursor, match.start)}
+          </Text>
+        );
+      }
+
+      parts.push(
+        <Text
+          key={`term-${idx}-${match.start}`}
+          style={styles.termHighlight}
+          onPress={() =>
+            onKeyTermPress({
+              term: match.term,
+              definition: match.definition,
+              sentenceIndex
+            })
+          }
+        >
+          {sentence.slice(match.start, match.end)}
+        </Text>
+      );
+
+      cursor = match.end;
+    });
+
+    if (cursor < sentence.length) {
+      parts.push(
+        <Text key={`plain-end-${cursor}`}>{sentence.slice(cursor)}</Text>
+      );
+    }
+
+    return parts;
+  };
 
   const onNextChunk = () => {
     if (!cached || !chunkCount) return;
@@ -178,18 +307,38 @@ export default function ReaderScreen() {
                       <View key={idx.toString()} style={styles.bulletItem}>
                         <View style={styles.bullet} />
                         <Text style={[styles.summaryText, getTextSizeStyle()]}>
-                          {s}
+                          {renderSentenceWithHighlights(s, idx)}
                         </Text>
                       </View>
                     ))}
-                    
+
                     {cached.easyread?.keyTerms?.length ? (
-                      <View style={styles.keyTermsContainer}>
-                        {cached.easyread.keyTerms.map((t, idx) => (
-                          <Text key={idx.toString()} style={[styles.keyTermInline, getTextSizeStyle()]}>
-                            ({t.term}: {t.definition})
+                      <Text style={styles.termHintText}>
+                        {language === "es"
+                          ? "Toca una palabra subrayada para ver su significado."
+                          : "Tap an underlined word to see its meaning."}
+                      </Text>
+                    ) : null}
+
+                    {selectedKeyTerm ? (
+                      <View style={styles.termCard}>
+                        <Text style={styles.termCardLabel}>
+                          {language === "es" ? "Palabra dificil" : "Difficult word"}
+                        </Text>
+                        <Text style={[styles.termCardTerm, getTextSizeStyle()]}>
+                          {selectedKeyTerm.term}
+                        </Text>
+                        <Text style={[styles.termCardDefinition, getTextSizeStyle()]}>
+                          {selectedKeyTerm.definition}
+                        </Text>
+                        <TouchableOpacity
+                          style={styles.termCardButton}
+                          onPress={() => setSelectedKeyTerm(null)}
+                        >
+                          <Text style={styles.termCardButtonText}>
+                            {language === "es" ? "Entendido" : "Got it"}
                           </Text>
-                        ))}
+                        </TouchableOpacity>
                       </View>
                     ) : null}
                   </>
@@ -345,17 +494,56 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     color: "white"
   },
-  keyTermsContainer: {
-    marginTop: 8,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(255, 255, 255, 0.2)"
+  termHighlight: {
+    textDecorationLine: "underline",
+    textDecorationColor: "#FDE68A",
+    backgroundColor: "rgba(255, 255, 255, 0.16)",
+    borderRadius: 4,
+    fontWeight: "700"
   },
-  keyTermInline: {
+  termHintText: {
+    marginTop: 8,
+    color: "rgba(255, 255, 255, 0.9)",
+    fontSize: 13,
+    fontStyle: "italic"
+  },
+  termCard: {
+    marginTop: 12,
+    backgroundColor: "rgba(255, 255, 255, 0.95)",
+    borderRadius: 12,
+    padding: 12
+  },
+  termCardLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#9A3412",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginBottom: 4
+  },
+  termCardTerm: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#111827",
+    marginBottom: 4
+  },
+  termCardDefinition: {
     fontSize: 14,
     lineHeight: 20,
+    color: "#1F2937"
+  },
+  termCardButton: {
+    alignSelf: "flex-start",
+    marginTop: 10,
+    backgroundColor: "#FF6B4A",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8
+  },
+  termCardButtonText: {
     color: "white",
-    marginBottom: 6
+    fontWeight: "700",
+    fontSize: 13
   },
   actionButton: {
     backgroundColor: "white",
