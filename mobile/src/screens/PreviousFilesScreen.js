@@ -229,7 +229,7 @@ export default function PreviousFilesScreen() {
 
       {loading ? (
         <View style={styles.center}>
-          <ActivityIndicator size="large" color="#2563EB" />
+          <ActivityIndicator size="large" color="#8F2D12" />
           <Text style={styles.loadingText}>{t("loading")}</Text>
         </View>
       ) : documents.length === 0 ? (

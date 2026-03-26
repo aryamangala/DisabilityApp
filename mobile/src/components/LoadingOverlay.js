@@ -5,7 +5,7 @@ export default function LoadingOverlay({ text }) {
   return (
     <View style={styles.overlay}>
       <View style={styles.box}>
-        <ActivityIndicator size="large" color="#2563EB" />
+        <ActivityIndicator size="large" color="#8F2D12" />
         {text ? <Text style={styles.text}>{text}</Text> : null}
       </View>
     </View>

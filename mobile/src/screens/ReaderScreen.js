@@ -5,7 +5,9 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  ActivityIndicator
+  ActivityIndicator,
+  Modal,
+  Pressable
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useNavigation } from "@react-navigation/native";
@@ -82,6 +84,30 @@ function getNonOverlappingTermMatches(sentence, keyTerms, sentenceIndex) {
   return filtered;
 }
 
+function getUniqueKeyTerms(keyTerms) {
+  if (!Array.isArray(keyTerms) || !keyTerms.length) {
+    return [];
+  }
+
+  const seen = new Set();
+  const unique = [];
+
+  keyTerms.forEach((item) => {
+    const term = (item?.term || "").trim();
+    const definition = (item?.definition || "").trim();
+    const normalizedTerm = term.toLowerCase();
+
+    if (!term || !definition || seen.has(normalizedTerm)) {
+      return;
+    }
+
+    seen.add(normalizedTerm);
+    unique.push({ term, definition });
+  });
+
+  return unique;
+}
+
 export default function ReaderScreen() {
   const {
     docId,
@@ -91,9 +117,10 @@ export default function ReaderScreen() {
     setChunkInCache,
     setCurrentChunkIndex
   } = useDocument();
-  const { getTextSizeStyle, language } = useSettings();
+  const { getTextSizeStyle, language, theme } = useSettings();
   const navigation = useNavigation();
   const t = (key) => getTranslation(key, language);
+  const isDark = theme !== "light";
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -141,19 +168,7 @@ export default function ReaderScreen() {
   }, [currentChunkIndex]);
 
   const onKeyTermPress = ({ term, definition, sentenceIndex }) => {
-    setSelectedKeyTerm((prev) => {
-      const isSameTerm =
-        prev &&
-        prev.term === term &&
-        prev.definition === definition &&
-        prev.sentenceIndex === sentenceIndex;
-
-      if (isSameTerm) {
-        return null;
-      }
-
-      return { term, definition, sentenceIndex };
-    });
+    setSelectedKeyTerm({ term, definition, sentenceIndex });
   };
 
   const renderSentenceWithHighlights = (sentence, sentenceIndex) => {
@@ -177,7 +192,7 @@ export default function ReaderScreen() {
       parts.push(
         <Text
           key={`term-${idx}-${match.start}`}
-          style={styles.termHighlight}
+          style={[styles.termHighlight, !isDark && styles.termHighlightLight]}
           onPress={() =>
             onKeyTermPress({
               term: match.term,
@@ -218,6 +233,13 @@ export default function ReaderScreen() {
     }
   };
 
+  const onPrevChunk = () => {
+    if (!cached || chunkCount == null) return;
+    if (currentChunkIndex > 0) {
+      setCurrentChunkIndex(currentChunkIndex - 1);
+    }
+  };
+
   // Check if we have enough data to show the button
   // Enable button as soon as we have chunk data (even if EasyRead is still generating)
   // The button should work even if EasyRead is being generated in the background
@@ -234,14 +256,16 @@ export default function ReaderScreen() {
     );
   }
 
+  const summaryKeyTerms = getUniqueKeyTerms(cached?.easyread?.keyTerms);
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, !isDark && styles.containerLight]}>
       <ChunkProgress current={currentChunkIndex} total={chunkCount} />
       <ErrorBanner message={error} />
 
       {loading && !cached && (
         <View style={styles.center}>
-          <ActivityIndicator size="large" color="#2563EB" />
+          <ActivityIndicator size="large" color="#8F2D12" />
           <Text style={styles.loadingText}>{t("loadingChunk")}</Text>
         </View>
       )}
@@ -251,122 +275,220 @@ export default function ReaderScreen() {
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
         >
-          <View style={styles.card}>
+          <View style={[styles.card, !isDark && styles.cardLight]}>
             {/* Original Text Section */}
-            <View style={styles.originalSection}>
+            <View style={[styles.originalSection, !isDark && styles.originalSectionLight]}>
               <TouchableOpacity
-                style={styles.sectionHeader}
+                style={[styles.sectionHeader, !isDark && styles.sectionHeaderLight]}
                 onPress={() => setIsOriginalExpanded(!isOriginalExpanded)}
                 activeOpacity={0.7}
               >
-                <Text style={styles.sectionIcon}>📄</Text>
-                <Text style={styles.sectionTitle}>{t("originalText")}</Text>
+                <Text style={[styles.sectionIcon, !isDark && styles.sectionIconLight]}>📄</Text>
+                <Text style={[styles.sectionTitle, !isDark && styles.sectionTitleLight]}>
+                  {t("originalText")}
+                </Text>
                 <View style={styles.expandButton}>
-                  <Text style={styles.expandIcon}>
+                  <Text style={[styles.expandIcon, !isDark && styles.expandIconLight]}>
                     {isOriginalExpanded ? "▼" : "▶"}
                   </Text>
                 </View>
               </TouchableOpacity>
               {isOriginalExpanded && (
                 <ScrollView style={styles.originalContent} nestedScrollEnabled>
-                  <Text style={[styles.originalText, getTextSizeStyle()]}>
+                  <Text style={[styles.originalText, getTextSizeStyle(), !isDark && styles.textDark]}>
                     {cached.originalText}
                   </Text>
                 </ScrollView>
               )}
               {!isOriginalExpanded && (
                 <View style={styles.collapsedPreview}>
-                  <Text style={[styles.previewText, getTextSizeStyle()]} numberOfLines={2}>
+                  <Text
+                    style={[styles.previewText, getTextSizeStyle(), !isDark && styles.textMutedDark]}
+                    numberOfLines={2}
+                  >
                     {cached.originalText}
                   </Text>
-                  <Text style={styles.expandHint}>{t("tapToViewFull")}</Text>
+                  <Text style={[styles.expandHint, !isDark && styles.textMutedDark]}>
+                    {t("tapToViewFull")}
+                  </Text>
                 </View>
               )}
             </View>
 
             {/* Simple Summary Section */}
-            <LinearGradient
-              colors={["#B42318", "#8F2D12"]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 0, y: 1 }}
-              style={styles.summarySection}
-            >
-              <View style={styles.sectionHeader}>
-                <Text style={styles.summaryIcon}>⚖</Text>
-                <Text style={styles.summaryTitle}>{t("simpleSummary")}</Text>
-              </View>
-              <View style={styles.summaryContent}>
+            {isDark ? (
+              <LinearGradient
+                colors={["#B42318", "#8F2D12"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 0, y: 1 }}
+                style={styles.summarySection}
+              >
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.summaryIcon}>⚖</Text>
+                  <Text style={styles.summaryTitle}>{t("simpleSummary")}</Text>
+                </View>
+                <View style={styles.summaryContent}>
+                  {!cached.easyread && loading ? (
+                    <View style={styles.loadingContainer}>
+                      <ActivityIndicator size="small" color="white" />
+                      <Text style={styles.loadingSummaryText}>{t("generatingEasyRead")}</Text>
+                    </View>
+                  ) : cached.easyread?.sentences?.length > 0 ? (
+                    <>
+                      {cached.easyread.sentences.map((s, idx) => (
+                        <View key={idx.toString()} style={styles.bulletItem}>
+                          <View style={styles.bullet} />
+                          <Text style={[styles.summaryText, getTextSizeStyle()]}>
+                            {renderSentenceWithHighlights(s, idx)}
+                          </Text>
+                        </View>
+                      ))}
+
+                      {summaryKeyTerms.length ? (
+                        <Text style={styles.termHintText}>
+                          {t("tapUnderlinedWordHint")}
+                        </Text>
+                      ) : null}
+
+                      {summaryKeyTerms.length ? (
+                        <View style={styles.termListSection}>
+                          <Text style={styles.termListTitle}>{t("difficultWordsTitle")}</Text>
+                          {summaryKeyTerms.map((item, idx) => (
+                            <View key={`${item.term}-${idx}`} style={styles.termListItem}>
+                              <Text style={[styles.termListTerm, getTextSizeStyle()]}>
+                                {item.term}
+                              </Text>
+                              <Text style={[styles.termListDefinition, getTextSizeStyle()]}>
+                                {item.definition}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      ) : null}
+                    </>
+                  ) : (
+                    <Text style={styles.noSummaryText}>
+                      {t("willBeGenerated")}
+                    </Text>
+                  )}
+                </View>
+              </LinearGradient>
+            ) : (
+              <View style={[styles.summarySection, styles.summarySectionLight]}>
+                <View style={[styles.sectionHeader, styles.sectionHeaderLight]}>
+                  <Text style={[styles.summaryIcon, styles.summaryIconLight]}>⚖</Text>
+                  <Text style={[styles.summaryTitle, styles.summaryTitleLight]}>{t("simpleSummary")}</Text>
+                </View>
+                <View style={styles.summaryContent}>
                 {!cached.easyread && loading ? (
                   <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="small" color="white" />
-                    <Text style={styles.loadingSummaryText}>{t("generatingEasyRead")}</Text>
+                    <ActivityIndicator size="small" color="#8F2D12" />
+                    <Text style={[styles.loadingSummaryText, styles.loadingSummaryTextLight]}>
+                      {t("generatingEasyRead")}
+                    </Text>
                   </View>
                 ) : cached.easyread?.sentences?.length > 0 ? (
                   <>
                     {cached.easyread.sentences.map((s, idx) => (
                       <View key={idx.toString()} style={styles.bulletItem}>
-                        <View style={styles.bullet} />
-                        <Text style={[styles.summaryText, getTextSizeStyle()]}>
+                        <View style={[styles.bullet, styles.bulletLight]} />
+                        <Text style={[styles.summaryText, getTextSizeStyle(), styles.summaryTextLight]}>
                           {renderSentenceWithHighlights(s, idx)}
                         </Text>
                       </View>
                     ))}
 
-                    {cached.easyread?.keyTerms?.length ? (
-                      <Text style={styles.termHintText}>
-                        {language === "es"
-                          ? "Toca una palabra subrayada para ver su significado."
-                          : "Tap an underlined word to see its meaning."}
+                    {summaryKeyTerms.length ? (
+                      <Text style={[styles.termHintText, styles.termHintTextLight]}>
+                        {t("tapUnderlinedWordHint")}
                       </Text>
                     ) : null}
 
-                    {selectedKeyTerm ? (
-                      <View style={styles.termCard}>
-                        <Text style={styles.termCardLabel}>
-                          {language === "es" ? "Palabra dificil" : "Difficult word"}
+                    {summaryKeyTerms.length ? (
+                      <View style={[styles.termListSection, styles.termListSectionLight]}>
+                        <Text style={[styles.termListTitle, styles.termListTitleLight]}>
+                          {t("difficultWordsTitle")}
                         </Text>
-                        <Text style={[styles.termCardTerm, getTextSizeStyle()]}>
-                          {selectedKeyTerm.term}
-                        </Text>
-                        <Text style={[styles.termCardDefinition, getTextSizeStyle()]}>
-                          {selectedKeyTerm.definition}
-                        </Text>
-                        <TouchableOpacity
-                          style={styles.termCardButton}
-                          onPress={() => setSelectedKeyTerm(null)}
-                        >
-                          <Text style={styles.termCardButtonText}>
-                            {language === "es" ? "Entendido" : "Got it"}
-                          </Text>
-                        </TouchableOpacity>
+                        {summaryKeyTerms.map((item, idx) => (
+                          <View key={`${item.term}-${idx}`} style={styles.termListItem}>
+                            <Text style={[styles.termListTerm, getTextSizeStyle(), styles.termListTermLight]}>
+                              {item.term}
+                            </Text>
+                            <Text style={[styles.termListDefinition, getTextSizeStyle(), styles.termListDefinitionLight]}>
+                              {item.definition}
+                            </Text>
+                          </View>
+                        ))}
                       </View>
                     ) : null}
                   </>
                 ) : (
-                  <Text style={styles.noSummaryText}>
+                  <Text style={[styles.noSummaryText, styles.noSummaryTextLight]}>
                     {t("willBeGenerated")}
                   </Text>
                 )}
+                </View>
               </View>
-            </LinearGradient>
+            )}
 
-            {/* Action Button */}
-            <TouchableOpacity
-              style={[
-                styles.actionButton,
-                !canShowButton && styles.actionButtonDisabled
-              ]}
-              disabled={!canShowButton}
-              onPress={onNextChunk}
-            >
-              <Text style={styles.actionButtonText}>
-                {currentChunkIndex + 1 < chunkCount ? t("nextChunk") : t("finishReading")}
-              </Text>
-            </TouchableOpacity>
+            {/* Action Buttons */}
+            <View style={styles.actionRow}>
+              <TouchableOpacity
+                style={[
+                  styles.secondaryButton,
+                  !isDark && styles.secondaryButtonLight,
+                  (currentChunkIndex === 0 || !canShowButton) && styles.actionButtonDisabled
+                ]}
+                disabled={currentChunkIndex === 0 || !canShowButton}
+                onPress={onPrevChunk}
+              >
+                <Text style={[styles.secondaryButtonText, !isDark && styles.secondaryButtonTextLight]}>
+                  {t("previousChunk")}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.actionButton,
+                  !isDark && styles.actionButtonLight,
+                  !canShowButton && styles.actionButtonDisabled
+                ]}
+                disabled={!canShowButton}
+                onPress={onNextChunk}
+              >
+                <Text style={[styles.actionButtonText, !isDark && styles.actionButtonTextLight]}>
+                  {currentChunkIndex + 1 < chunkCount ? t("nextChunk") : t("finishReading")}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </ScrollView>
       )}
 
+      <Modal
+        visible={!!selectedKeyTerm}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSelectedKeyTerm(null)}
+      >
+        <Pressable
+          style={[
+            styles.definitionModalBackdrop,
+            !isDark && styles.definitionModalBackdropLight
+          ]}
+          onPress={() => setSelectedKeyTerm(null)}
+        >
+          <Pressable style={styles.definitionBubble} onPress={() => {}}>
+            <Text style={styles.definitionBubbleLabel}>{t("difficultWordLabel")}</Text>
+            <Text style={[styles.definitionBubbleTerm, getTextSizeStyle()]}>
+              {selectedKeyTerm?.term}
+            </Text>
+            <Text style={[styles.definitionBubbleText, getTextSizeStyle()]}>
+              {selectedKeyTerm?.definition}
+            </Text>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -377,6 +499,9 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingTop: 24,
     backgroundColor: "#1E293B"
+  },
+  containerLight: {
+    backgroundColor: "#F7F6F2"
   },
   header: {
     fontSize: 20,
@@ -400,6 +525,9 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: "hidden"
   },
+  cardLight: {
+    backgroundColor: "#F7F6F2"
+  },
   originalSection: {
     backgroundColor: "#FAF9F6",
     borderTopLeftRadius: 16,
@@ -407,10 +535,26 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingBottom: 16
   },
+  originalSectionLight: {
+    backgroundColor: "#FFFEFB",
+    borderWidth: 1.5,
+    borderColor: "#8F2D12",
+    marginBottom: 12,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.06,
+    shadowRadius: 14,
+    elevation: 3
+  },
   sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 12
+  },
+  sectionHeaderLight: {
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1D6CC"
   },
   expandButton: {
     marginLeft: "auto"
@@ -424,12 +568,25 @@ const styles = StyleSheet.create({
     fontSize: 18,
     marginRight: 8
   },
+  sectionIconLight: {
+    backgroundColor: "#FBE4DD",
+    borderRadius: 16,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    overflow: "hidden"
+  },
   sectionTitle: {
     fontSize: 11,
     fontWeight: "600",
     letterSpacing: 1,
     color: "#5B6473",
     textTransform: "uppercase"
+  },
+  sectionTitleLight: {
+    color: "#1F2937"
+  },
+  expandIconLight: {
+    color: "#8F2D12"
   },
   originalContent: {
     maxHeight: 300
@@ -475,6 +632,28 @@ const styles = StyleSheet.create({
   summaryContent: {
     marginTop: 8
   },
+  summarySectionLight: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1.5,
+    borderColor: "#8F2D12",
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.07,
+    shadowRadius: 16,
+    elevation: 4
+  },
+  summaryIconLight: {
+    color: "#8F2D12",
+    backgroundColor: "#FBE4DD",
+    borderRadius: 16,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    overflow: "hidden"
+  },
+  summaryTitleLight: {
+    color: "#111827",
+    fontWeight: "700"
+  },
   bulletItem: {
     flexDirection: "row",
     marginBottom: 12,
@@ -488,11 +667,17 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginRight: 12
   },
+  bulletLight: {
+    backgroundColor: "#64748B"
+  },
   summaryText: {
     flex: 1,
     fontSize: 15,
     lineHeight: 22,
     color: "white"
+  },
+  summaryTextLight: {
+    color: "#0F172A"
   },
   termHighlight: {
     textDecorationLine: "underline",
@@ -501,19 +686,79 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     fontWeight: "700"
   },
+  termHighlightLight: {
+    textDecorationColor: "#8F2D12",
+    backgroundColor: "rgba(143, 45, 18, 0.10)"
+  },
+  textDark: {
+    color: "#111827"
+  },
+  textMutedDark: {
+    color: "#475569"
+  },
   termHintText: {
     marginTop: 8,
     color: "rgba(255, 255, 255, 0.95)",
     fontSize: 13,
     fontStyle: "italic"
   },
-  termCard: {
-    marginTop: 12,
-    backgroundColor: "rgba(255, 255, 255, 0.95)",
-    borderRadius: 12,
-    padding: 12
+  termHintTextLight: {
+    color: "#334155"
   },
-  termCardLabel: {
+  termListSection: {
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255, 255, 255, 0.25)"
+  },
+  termListSectionLight: {
+    borderTopColor: "#E2E8F0"
+  },
+  termListTitle: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "white",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginBottom: 8
+  },
+  termListTitleLight: {
+    color: "#0F172A"
+  },
+  termListItem: {
+    marginBottom: 8
+  },
+  termListTerm: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#FEF3C7"
+  },
+  termListTermLight: {
+    color: "#0F172A"
+  },
+  termListDefinition: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: "rgba(255, 255, 255, 0.96)"
+  },
+  termListDefinitionLight: {
+    color: "#334155"
+  },
+  definitionModalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.35)",
+    justifyContent: "center",
+    padding: 24
+  },
+  definitionModalBackdropLight: {
+    backgroundColor: "rgba(15, 23, 42, 0.25)"
+  },
+  definitionBubble: {
+    backgroundColor: "rgba(255, 255, 255, 0.98)",
+    borderRadius: 12,
+    padding: 14
+  },
+  definitionBubbleLabel: {
     fontSize: 12,
     fontWeight: "700",
     color: "#9A3412",
@@ -521,31 +766,19 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
     marginBottom: 4
   },
-  termCardTerm: {
+  definitionBubbleTerm: {
     fontSize: 16,
     fontWeight: "700",
     color: "#111827",
     marginBottom: 4
   },
-  termCardDefinition: {
+  definitionBubbleText: {
     fontSize: 14,
     lineHeight: 20,
     color: "#1F2937"
   },
-  termCardButton: {
-    alignSelf: "flex-start",
-    marginTop: 10,
-    backgroundColor: "#8F2D12",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8
-  },
-  termCardButtonText: {
-    color: "white",
-    fontWeight: "700",
-    fontSize: 13
-  },
   actionButton: {
+    flex: 1,
     backgroundColor: "white",
     borderRadius: 12,
     borderWidth: 2,
@@ -553,12 +786,15 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     paddingHorizontal: 24,
     alignItems: "center",
-    marginTop: 16,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3
+  },
+  actionButtonLight: {
+    borderColor: "#8F2D12",
+    shadowOpacity: 0.04
   },
   actionButtonDisabled: {
     opacity: 0.5
@@ -567,6 +803,35 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     color: "#8F2D12"
+  },
+  actionButtonTextLight: {
+    color: "#8F2D12"
+  },
+  actionRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 16
+  },
+  secondaryButton: {
+    flex: 1,
+    backgroundColor: "transparent",
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: "rgba(255, 255, 255, 0.7)",
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    alignItems: "center"
+  },
+  secondaryButtonLight: {
+    borderColor: "#94A3B8"
+  },
+  secondaryButtonText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "white"
+  },
+  secondaryButtonTextLight: {
+    color: "#334155"
   },
   center: {
     flex: 1,
@@ -588,12 +853,18 @@ const styles = StyleSheet.create({
     color: "white",
     fontSize: 14
   },
+  loadingSummaryTextLight: {
+    color: "#334155"
+  },
   noSummaryText: {
     color: "rgba(255, 255, 255, 0.92)",
     fontSize: 14,
     fontStyle: "italic",
     textAlign: "center",
     paddingVertical: 20
+  },
+  noSummaryTextLight: {
+    color: "#475569"
   }
 });
 

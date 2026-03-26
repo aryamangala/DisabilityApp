@@ -8,6 +8,7 @@ const SettingsContext = createContext(null);
 export function SettingsProvider({ children }) {
   const [textSize, setTextSize] = useState("medium"); // small, medium, large, xlarge
   const [language, setLanguage] = useState("es"); // es (Spanish) or en (English)
+  const [theme, setTheme] = useState("dark"); // dark (default/current) or light
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -18,6 +19,7 @@ export function SettingsProvider({ children }) {
           const parsed = JSON.parse(stored);
           setTextSize(parsed.textSize || "medium");
           setLanguage(parsed.language || "es");
+          setTheme(parsed.theme === "light" ? "light" : "dark");
         }
       } catch (e) {
         console.warn("Failed to restore settings:", e.message);
@@ -30,14 +32,14 @@ export function SettingsProvider({ children }) {
   useEffect(() => {
     if (loading) return;
     (async () => {
-      const payload = { textSize, language };
+      const payload = { textSize, language, theme };
       try {
         await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
       } catch (e) {
         console.warn("Failed to persist settings:", e.message);
       }
     })();
-  }, [textSize, language, loading]);
+  }, [textSize, language, theme, loading]);
 
   const getTextSizeStyle = () => {
     const sizes = {
@@ -54,6 +56,8 @@ export function SettingsProvider({ children }) {
     setTextSize,
     language,
     setLanguage,
+    theme,
+    setTheme,
     getTextSizeStyle,
     loading
   };

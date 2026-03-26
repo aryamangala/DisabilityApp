@@ -12,7 +12,7 @@ import { getTranslation } from "../utils/translations";
 
 export default function SettingsScreen() {
   const navigation = useNavigation();
-  const { textSize, setTextSize, language, setLanguage, getTextSizeStyle } = useSettings();
+  const { textSize, setTextSize, language, setLanguage, theme, setTheme, getTextSizeStyle } = useSettings();
   const t = (key) => getTranslation(key, language);
 
   const textSizes = [
@@ -33,6 +33,49 @@ export default function SettingsScreen() {
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>{t("appearance")}</Text>
+          <Text style={styles.sectionDescription}>{t("chooseTheme")}</Text>
+
+          <View style={styles.optionsContainer}>
+            <TouchableOpacity
+              style={[
+                styles.optionButton,
+                theme === "light" && styles.optionButtonActive
+              ]}
+              onPress={() => setTheme("light")}
+            >
+              <Text
+                style={[
+                  styles.optionText,
+                  theme === "light" && styles.optionTextActive
+                ]}
+              >
+                {t("lightMode")}
+              </Text>
+              {theme === "light" && <Text style={styles.checkmark}>✓</Text>}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.optionButton,
+                theme === "dark" && styles.optionButtonActive
+              ]}
+              onPress={() => setTheme("dark")}
+            >
+              <Text
+                style={[
+                  styles.optionText,
+                  theme === "dark" && styles.optionTextActive
+                ]}
+              >
+                {t("darkMode")}
+              </Text>
+              {theme === "dark" && <Text style={styles.checkmark}>✓</Text>}
+            </TouchableOpacity>
+          </View>
+        </View>
+
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t("textSize")}</Text>
           <Text style={styles.sectionDescription}>

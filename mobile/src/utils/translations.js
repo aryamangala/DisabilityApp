@@ -27,10 +27,14 @@ export const translations = {
     simpleSummary: "SIMPLE SUMMARY",
     tapToViewFull: "Tap to view full text",
     iUnderstand: "I Understand. Test Me",
+    previousChunk: "← Previous chunk",
     nextChunk: "Next Chunk →",
     finishReading: "Finish Reading",
     generatingEasyRead: "Generating EasyRead format...",
     willBeGenerated: "EasyRead format will be generated when you access the quiz.",
+    tapUnderlinedWordHint: "Tap an underlined word to see its meaning.",
+    difficultWordsTitle: "Difficult words",
+    difficultWordLabel: "Difficult word",
     
     // Quiz Screen (if still exists)
     quiz: "Quiz",
@@ -63,6 +67,10 @@ export const translations = {
     
     // Settings Screen
     settingsTitle: "Settings",
+    appearance: "Appearance",
+    chooseTheme: "Choose a theme that feels comfortable",
+    lightMode: "Light mode",
+    darkMode: "Dark mode",
     textSize: "Text Size",
     chooseTextSize: "Choose the text size that's most comfortable for reading",
     preview: "Preview:",
@@ -123,10 +131,14 @@ export const translations = {
     simpleSummary: "RESUMEN SIMPLE",
     tapToViewFull: "Toca para ver el texto completo",
     iUnderstand: "Entiendo. Poner a Prueba",
+    previousChunk: "← Fragmento anterior",
     nextChunk: "Siguiente Fragmento →",
     finishReading: "Terminar Lectura",
     generatingEasyRead: "Generando formato Lectura Fácil...",
     willBeGenerated: "El formato Lectura Fácil se generará cuando accedas a la prueba.",
+    tapUnderlinedWordHint: "Toca una palabra subrayada para ver su significado.",
+    difficultWordsTitle: "Palabras dificiles",
+    difficultWordLabel: "Palabra dificil",
     
     // Quiz Screen (if still exists)
     quiz: "Prueba",
@@ -159,6 +171,10 @@ export const translations = {
     
     // Settings Screen
     settingsTitle: "Configuración",
+    appearance: "Apariencia",
+    chooseTheme: "Elige un tema que se sienta cómodo",
+    lightMode: "Modo claro",
+    darkMode: "Modo oscuro",
     textSize: "Tamaño de Texto",
     chooseTextSize: "Elige el tamaño de texto más cómodo para leer",
     preview: "Vista previa:",
