@@ -210,7 +210,7 @@ export default function PreviousFilesScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={styles.backButton}>← {t("back")}</Text>
+          <Text style={styles.backButton}>{t("back")}</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{t("previousFilesTitle")}</Text>
         <View style={styles.headerRight}>
