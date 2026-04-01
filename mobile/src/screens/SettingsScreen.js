@@ -74,6 +74,44 @@ export default function SettingsScreen() {
               {theme === "dark" && <Text style={styles.checkmark}>✓</Text>}
             </TouchableOpacity>
           </View>
+
+          <View
+            style={[
+              styles.appearancePreviewContainer,
+              theme === "dark"
+                ? styles.appearancePreviewContainerDark
+                : styles.appearancePreviewContainerLight
+            ]}
+          >
+            <Text
+              style={[
+                styles.previewLabel,
+                theme === "dark" && styles.appearancePreviewLabelDark
+              ]}
+            >
+              {t("preview")}
+            </Text>
+            <Text
+              style={[
+                styles.appearancePreviewTitle,
+                theme === "dark"
+                  ? styles.appearancePreviewTitleDark
+                  : styles.appearancePreviewTitleLight
+              ]}
+            >
+              {t("simpleSummary")}
+            </Text>
+            <Text
+              style={[
+                styles.appearancePreviewBody,
+                theme === "dark"
+                  ? styles.appearancePreviewBodyDark
+                  : styles.appearancePreviewBodyLight
+              ]}
+            >
+              {t("previewText")}
+            </Text>
+          </View>
         </View>
 
         <View style={styles.section}>
@@ -272,5 +310,44 @@ const styles = StyleSheet.create({
   previewText: {
     color: "#111827",
     lineHeight: 22
+  },
+  appearancePreviewContainer: {
+    marginTop: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 12
+  },
+  appearancePreviewContainerLight: {
+    backgroundColor: "#F5F1E8",
+    borderColor: "#D1D5DB"
+  },
+  appearancePreviewContainerDark: {
+    backgroundColor: "#1E293B",
+    borderColor: "#334155"
+  },
+  appearancePreviewLabelDark: {
+    color: "#CBD5E1"
+  },
+  appearancePreviewTitle: {
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginBottom: 8
+  },
+  appearancePreviewTitleLight: {
+    color: "#2C2C2C"
+  },
+  appearancePreviewTitleDark: {
+    color: "#F8FAFC"
+  },
+  appearancePreviewBody: {
+    lineHeight: 22
+  },
+  appearancePreviewBodyLight: {
+    color: "#111827"
+  },
+  appearancePreviewBodyDark: {
+    color: "#E2E8F0"
   }
 });
