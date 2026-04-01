@@ -63,3 +63,4 @@ temp/
 backend/.env
 backend/.env
 backend/easyread.db
+mynotes.txt
