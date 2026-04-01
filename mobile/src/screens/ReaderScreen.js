@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -18,6 +18,11 @@ import { fetchChunk } from "../api";
 import ErrorBanner from "../components/ErrorBanner";
 import ChunkProgress from "../components/ChunkProgress";
 import { getTranslation } from "../utils/translations";
+import {
+  speakSentenceList,
+  speakText,
+  stopSpeech
+} from "../utils/speech";
 
 function isWordChar(char) {
   return /[A-Za-z0-9\u00C0-\u017F_]/.test(char);
@@ -124,6 +129,9 @@ export default function ReaderScreen() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [speechStatus, setSpeechStatus] = useState("idle");
+  const [activeReadSentenceIndex, setActiveReadSentenceIndex] = useState(null);
+  const stopRequestedRef = useRef(false);
   const [isOriginalExpanded, setIsOriginalExpanded] = useState(false);
   const [selectedKeyTerm, setSelectedKeyTerm] = useState(null);
 
@@ -165,7 +173,16 @@ export default function ReaderScreen() {
   useEffect(() => {
     setIsOriginalExpanded(false);
     setSelectedKeyTerm(null);
+    stopSpeech().catch(() => {});
+    setSpeechStatus("idle");
+    setActiveReadSentenceIndex(null);
   }, [currentChunkIndex]);
+
+  useEffect(() => {
+    return () => {
+      stopSpeech().catch(() => {});
+    };
+  }, []);
 
   const onKeyTermPress = ({ term, definition, sentenceIndex }) => {
     setSelectedKeyTerm({ term, definition, sentenceIndex });
@@ -219,6 +236,9 @@ export default function ReaderScreen() {
 
   const onNextChunk = () => {
     if (!cached || !chunkCount) return;
+    stopSpeech().catch(() => {});
+    setSpeechStatus("idle");
+    setActiveReadSentenceIndex(null);
     
     // Navigate to next chunk if available
     if (currentChunkIndex + 1 < chunkCount) {
@@ -235,9 +255,72 @@ export default function ReaderScreen() {
 
   const onPrevChunk = () => {
     if (!cached || chunkCount == null) return;
+    stopSpeech().catch(() => {});
+    setSpeechStatus("idle");
+    setActiveReadSentenceIndex(null);
     if (currentChunkIndex > 0) {
       setCurrentChunkIndex(currentChunkIndex - 1);
     }
+  };
+
+  const onReadAloud = async () => {
+    stopRequestedRef.current = false;
+
+    const easyreadSentences = Array.isArray(cached?.easyread?.sentences)
+      ? cached.easyread.sentences
+      : [];
+    const textToRead = easyreadSentences.length
+      ? easyreadSentences.join(" ")
+      : cached?.originalText || "";
+
+    if (!textToRead.trim()) {
+      setError(t("noTextToRead"));
+      return;
+    }
+
+    setError("");
+    setSpeechStatus("speaking");
+
+    try {
+      if (easyreadSentences.length) {
+        await speakSentenceList(easyreadSentences, {
+          language: "es",
+          rate: 0.98,
+          onPartStart: (index) => setActiveReadSentenceIndex(index)
+        });
+      } else {
+        setActiveReadSentenceIndex(null);
+        await speakText(textToRead, {
+          language: "es",
+          rate: 0.98
+        });
+      }
+      setSpeechStatus("idle");
+      setActiveReadSentenceIndex(null);
+      stopRequestedRef.current = false;
+    } catch {
+      if (!stopRequestedRef.current) {
+        setError(t("failedToLoad"));
+      }
+      setSpeechStatus("idle");
+      setActiveReadSentenceIndex(null);
+      stopRequestedRef.current = false;
+    }
+  };
+
+  const onStopReadAloud = async () => {
+    stopRequestedRef.current = true;
+    await stopSpeech().catch(() => {});
+    setSpeechStatus("idle");
+    setActiveReadSentenceIndex(null);
+  };
+
+  const onToggleReadAloud = async () => {
+    if (speechStatus === "speaking") {
+      await onStopReadAloud();
+      return;
+    }
+    await onReadAloud();
   };
 
   // Check if we have enough data to show the button
@@ -301,7 +384,13 @@ export default function ReaderScreen() {
                 </ScrollView>
               )}
               {!isOriginalExpanded && (
-                <View style={styles.collapsedPreview}>
+                <TouchableOpacity
+                  style={styles.collapsedPreview}
+                  onPress={() => setIsOriginalExpanded(true)}
+                  activeOpacity={0.75}
+                  accessibilityRole="button"
+                  accessibilityLabel={t("tapToViewFull")}
+                >
                   <Text
                     style={[styles.previewText, getTextSizeStyle(), !isDark && styles.textMutedDark]}
                     numberOfLines={2}
@@ -311,7 +400,7 @@ export default function ReaderScreen() {
                   <Text style={[styles.expandHint, !isDark && styles.textMutedDark]}>
                     {t("tapToViewFull")}
                   </Text>
-                </View>
+                </TouchableOpacity>
               )}
             </View>
 
@@ -323,9 +412,26 @@ export default function ReaderScreen() {
                 end={{ x: 0, y: 1 }}
                 style={styles.summarySection}
               >
-                <View style={styles.sectionHeader}>
-                  <Text style={styles.summaryIcon}>⚖</Text>
-                  <Text style={styles.summaryTitle}>{t("simpleSummary")}</Text>
+                <View style={styles.summaryHeaderRow}>
+                  <View style={styles.sectionHeader}>
+                    <Text style={styles.summaryIcon}>⚖</Text>
+                    <Text style={styles.summaryTitle}>{t("simpleSummary")}</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[
+                      styles.ttsToggleButton,
+                      speechStatus === "speaking" && styles.ttsToggleButtonActive,
+                      !canShowButton && styles.actionButtonDisabled
+                    ]}
+                    disabled={!canShowButton}
+                    onPress={onToggleReadAloud}
+                  >
+                    <Text style={styles.ttsToggleButtonText}>
+                      {speechStatus === "speaking"
+                        ? `⏹ ${t("stopReadingAloud")}`
+                        : `🔊 ${t("readAloud")}`}
+                    </Text>
+                  </TouchableOpacity>
                 </View>
                 <View style={styles.summaryContent}>
                   {!cached.easyread && loading ? (
@@ -338,7 +444,15 @@ export default function ReaderScreen() {
                       {cached.easyread.sentences.map((s, idx) => (
                         <View key={idx.toString()} style={styles.bulletItem}>
                           <View style={styles.bullet} />
-                          <Text style={[styles.summaryText, getTextSizeStyle()]}>
+                          <Text
+                            style={[
+                              styles.summaryText,
+                              getTextSizeStyle(),
+                              speechStatus === "speaking" &&
+                                activeReadSentenceIndex === idx &&
+                                styles.activeReadingText
+                            ]}
+                          >
                             {renderSentenceWithHighlights(s, idx)}
                           </Text>
                         </View>
@@ -375,9 +489,33 @@ export default function ReaderScreen() {
               </LinearGradient>
             ) : (
               <View style={[styles.summarySection, styles.summarySectionLight]}>
-                <View style={[styles.sectionHeader, styles.sectionHeaderLight]}>
-                  <Text style={[styles.summaryIcon, styles.summaryIconLight]}>⚖</Text>
-                  <Text style={[styles.summaryTitle, styles.summaryTitleLight]}>{t("simpleSummary")}</Text>
+                <View style={styles.summaryHeaderRow}>
+                  <View style={[styles.sectionHeader, styles.sectionHeaderLight]}>
+                    <Text style={[styles.summaryIcon, styles.summaryIconLight]}>⚖</Text>
+                    <Text style={[styles.summaryTitle, styles.summaryTitleLight]}>
+                      {t("simpleSummary")}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[
+                      styles.ttsToggleButtonLight,
+                      speechStatus === "speaking" && styles.ttsToggleButtonLightActive,
+                      !canShowButton && styles.actionButtonDisabled
+                    ]}
+                    disabled={!canShowButton}
+                    onPress={onToggleReadAloud}
+                  >
+                    <Text
+                      style={[
+                        styles.ttsToggleButtonTextLight,
+                        speechStatus === "speaking" && styles.ttsToggleButtonTextLightActive
+                      ]}
+                    >
+                      {speechStatus === "speaking"
+                        ? `⏹ ${t("stopReadingAloud")}`
+                        : `🔊 ${t("readAloud")}`}
+                    </Text>
+                  </TouchableOpacity>
                 </View>
                 <View style={styles.summaryContent}>
                 {!cached.easyread && loading ? (
@@ -392,7 +530,16 @@ export default function ReaderScreen() {
                     {cached.easyread.sentences.map((s, idx) => (
                       <View key={idx.toString()} style={styles.bulletItem}>
                         <View style={[styles.bullet, styles.bulletLight]} />
-                        <Text style={[styles.summaryText, getTextSizeStyle(), styles.summaryTextLight]}>
+                        <Text
+                          style={[
+                            styles.summaryText,
+                            getTextSizeStyle(),
+                            styles.summaryTextLight,
+                            speechStatus === "speaking" &&
+                              activeReadSentenceIndex === idx &&
+                              styles.activeReadingTextLight
+                          ]}
+                        >
                           {renderSentenceWithHighlights(s, idx)}
                         </Text>
                       </View>
@@ -629,6 +776,30 @@ const styles = StyleSheet.create({
     color: "white",
     textTransform: "uppercase"
   },
+  summaryHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 12
+  },
+  ttsToggleButton: {
+    borderRadius: 999,
+    backgroundColor: "rgba(255, 255, 255, 0.22)",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.45)"
+  },
+  ttsToggleButtonActive: {
+    backgroundColor: "rgba(17, 24, 39, 0.34)",
+    borderColor: "rgba(255, 255, 255, 0.75)"
+  },
+  ttsToggleButtonText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700"
+  },
   summaryContent: {
     marginTop: 8
   },
@@ -654,6 +825,26 @@ const styles = StyleSheet.create({
     color: "#111827",
     fontWeight: "700"
   },
+  ttsToggleButtonLight: {
+    borderRadius: 999,
+    backgroundColor: "#FDE8E2",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: "#E2A895"
+  },
+  ttsToggleButtonLightActive: {
+    backgroundColor: "#8F2D12",
+    borderColor: "#8F2D12"
+  },
+  ttsToggleButtonTextLight: {
+    color: "#8F2D12",
+    fontSize: 13,
+    fontWeight: "700"
+  },
+  ttsToggleButtonTextLightActive: {
+    color: "#FFFFFF"
+  },
   bulletItem: {
     flexDirection: "row",
     marginBottom: 12,
@@ -676,8 +867,20 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     color: "white"
   },
+  activeReadingText: {
+    backgroundColor: "rgba(255, 255, 255, 0.22)",
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4
+  },
   summaryTextLight: {
     color: "#0F172A"
+  },
+  activeReadingTextLight: {
+    backgroundColor: "rgba(143, 45, 18, 0.14)",
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4
   },
   termHighlight: {
     textDecorationLine: "underline",
