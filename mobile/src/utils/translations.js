@@ -35,6 +35,10 @@ export const translations = {
     tapUnderlinedWordHint: "Tap an underlined word to see its meaning.",
     difficultWordsTitle: "Difficult words",
     difficultWordLabel: "Difficult word",
+    readAloud: "Read Aloud",
+    stopReadingAloud: "Stop Audio",
+    readingAloud: "Reading...",
+    noTextToRead: "No text available to read.",
     
     // Quiz Screen (if still exists)
     quiz: "Quiz",
@@ -139,6 +143,10 @@ export const translations = {
     tapUnderlinedWordHint: "Toca una palabra subrayada para ver su significado.",
     difficultWordsTitle: "Palabras dificiles",
     difficultWordLabel: "Palabra dificil",
+    readAloud: "Leer en voz alta",
+    stopReadingAloud: "Detener audio",
+    readingAloud: "Leyendo...",
+    noTextToRead: "No hay texto disponible para leer.",
     
     // Quiz Screen (if still exists)
     quiz: "Prueba",
