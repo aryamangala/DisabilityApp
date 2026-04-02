@@ -1,0 +1,6 @@
+# Fallback if the project is deployed without Docker: compile sqlite3 on the host.
+[variables]
+NPM_CONFIG_BUILD_FROM_SOURCE = "true"
+
+[phases.setup]
+aptPkgs = ["python3", "build-essential"]

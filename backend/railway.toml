@@ -1,0 +1,5 @@
+# Prefer Docker so sqlite3 compiles against the same libc as runtime (fixes GLIBC mismatch
+# when Nixpacks would use Node 22 + incompatible prebuilds).
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"

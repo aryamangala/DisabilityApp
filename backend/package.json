@@ -4,6 +4,9 @@
   "description": "EasyRead backend - Node.js + Express + SQLite + OpenAI",
   "type": "module",
   "main": "server.mjs",
+  "engines": {
+    "node": ">=20 <23"
+  },
   "scripts": {
     "start": "node server.mjs",
     "dev": "NODE_ENV=development node server.mjs"

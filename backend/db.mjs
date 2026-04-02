@@ -6,7 +6,7 @@ sqlite3.verbose();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DB_PATH = path.join(__dirname, "easyread.db");
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, "easyread.db");
 
 export const db = new sqlite3.Database(DB_PATH);
 
