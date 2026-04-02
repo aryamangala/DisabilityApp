@@ -27,7 +27,20 @@ export default {
     web: {
       bundler: "metro",
     },
-    plugins: ["expo-document-picker", "expo-image-picker", "expo-asset"],
+    plugins: [
+      "expo-document-picker",
+      [
+        "expo-image-picker",
+        {
+          // App only uses launchCameraAsync (ImportScreen) — not the photo library or video/mic.
+          photosPermission: false,
+          microphonePermission: false,
+          cameraPermission:
+            "EasyRead needs camera access to photograph documents so text can be extracted and simplified.",
+        },
+      ],
+      "expo-asset",
+    ],
     extra: {
       backendUrl: defaultRemoteBackend,
     },

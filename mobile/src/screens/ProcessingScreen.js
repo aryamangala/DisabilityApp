@@ -57,18 +57,30 @@ export default function ProcessingScreen() {
           });
         } else if (mode === "pdf" || mode === "image") {
           setStatus("Preparing file upload...");
-          console.log("Processing file upload:", { mode, payload: { ...payload, uri: payload.uri?.substring(0, 50) } });
-          
-          result = await createDocumentFromFile({
-            title: payload.title,
-            language: payload.language,
-            uri: payload.uri,
-            name: payload.name,
-            mimeType: payload.mimeType,
-            inputType: mode === "pdf" ? "pdf" : "image",
-            file: payload.file // Pass file object for web
+          console.log("Processing file upload:", {
+            mode,
+            pages: payload.imagePages?.length || 1
           });
-          
+
+          if (mode === "image" && payload.imagePages?.length > 0) {
+            result = await createDocumentFromFile({
+              title: payload.title,
+              language: payload.language,
+              inputType: "image",
+              imagePages: payload.imagePages
+            });
+          } else {
+            result = await createDocumentFromFile({
+              title: payload.title,
+              language: payload.language,
+              uri: payload.uri,
+              name: payload.name,
+              mimeType: payload.mimeType,
+              inputType: mode === "pdf" ? "pdf" : "image",
+              file: payload.file
+            });
+          }
+
           setStatus("Processing document...");
         } else {
           throw new Error("Unknown mode.");

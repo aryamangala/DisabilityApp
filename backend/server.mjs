@@ -33,9 +33,15 @@ app.use(express.json({ limit: "10mb" }));
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB - reduced to prevent memory issues
+    fileSize: 10 * 1024 * 1024, // per file
+    files: 25
   }
 });
+
+const documentUpload = upload.fields([
+  { name: "file", maxCount: 1 },
+  { name: "files", maxCount: 24 }
+]);
 
 // More lenient rate limiting for development/testing
 // Increase limits significantly to avoid blocking during testing
@@ -402,7 +408,7 @@ app.get("/test-openai", async (req, res) => {
 
 app.post(
   "/documents",
-  upload.single("file"),
+  documentUpload,
   async (req, res) => {
     try {
       const contentType = req.headers["content-type"] || "";
@@ -435,21 +441,15 @@ app.post(
         });
       }
 
-      const { file } = req;
+      const fileField = req.files?.file?.[0];
+      const filesField = req.files?.files || [];
       const { title, language = "auto", inputType } = req.body || {};
 
       console.log("File upload received:", {
-        hasFile: !!file,
-        fileName: file?.originalname,
-        fileSize: file?.size,
-        inputType,
-        contentType: file?.mimetype
+        hasSingleFile: !!fileField,
+        multiCount: filesField.length,
+        inputType
       });
-
-      if (!file) {
-        console.error("No file received in request");
-        return res.status(400).json({ error: "Missing file field." });
-      }
 
       if (inputType !== "pdf" && inputType !== "image") {
         return res
@@ -461,8 +461,12 @@ app.post(
       let extractedText = "";
 
       if (inputType === "pdf") {
-        console.log("Parsing PDF, size:", file.buffer.length, "bytes");
-        const pdfData = await pdfParse(file.buffer);
+        if (!fileField) {
+          console.error("No PDF file received");
+          return res.status(400).json({ error: "Missing file field." });
+        }
+        console.log("Parsing PDF, size:", fileField.buffer.length, "bytes");
+        const pdfData = await pdfParse(fileField.buffer);
         extractedText = (pdfData.text || "").trim();
         console.log("PDF text extracted, length:", extractedText.length);
 
@@ -475,12 +479,35 @@ app.post(
           });
         }
       } else if (inputType === "image") {
-        console.log("Processing image OCR");
-        const mimeType = file.mimetype || mimeFromFilename(file.originalname);
-        const base64 = file.buffer.toString("base64");
-        console.log("Image base64 length:", base64.length);
-        extractedText = await ocrImageToText(base64, mimeType);
-        console.log("OCR text extracted, length:", extractedText.length);
+        const imageBuffers =
+          filesField.length > 0 ? filesField : fileField ? [fileField] : [];
+        if (imageBuffers.length === 0) {
+          return res.status(400).json({
+            error: "Missing image file(s). Send one 'file' or multiple 'files' parts."
+          });
+        }
+        if (imageBuffers.length > 24) {
+          return res.status(400).json({
+            error: "Too many images (maximum 24 pages per document)."
+          });
+        }
+
+        console.log("Processing image OCR, page count:", imageBuffers.length);
+        const parts = [];
+        for (let i = 0; i < imageBuffers.length; i++) {
+          const img = imageBuffers[i];
+          const mimeType = img.mimetype || mimeFromFilename(img.originalname);
+          const base64 = img.buffer.toString("base64");
+          if (i > 0) {
+            await new Promise((r) => setTimeout(r, 400));
+          }
+          const pageText = await ocrImageToText(base64, mimeType);
+          parts.push(
+            `\n\n--- Page ${i + 1} ---\n\n${(pageText || "").trim()}`
+          );
+        }
+        extractedText = parts.join("\n").trim();
+        console.log("OCR combined length:", extractedText.length);
       }
 
       if (!extractedText || extractedText.trim().length < 20) {
@@ -496,8 +523,12 @@ app.post(
       // if (sensitive) { ... }
 
       console.log("Storing document and chunks...");
+      const fallbackName =
+        inputType === "pdf"
+          ? fileField?.originalname
+          : (filesField[0] || fileField)?.originalname;
       const { docId, chunkCount } = await storeDocumentAndChunks({
-        title: title || file.originalname || "Untitled",
+        title: title || fallbackName || "Untitled",
         language,
         text: extractedText
       });

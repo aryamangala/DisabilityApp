@@ -37,6 +37,30 @@ async function handleResponse(resp) {
   return data;
 }
 
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+async function webUriToFile(uri, fallbackName, mimeType) {
+  const response = await fetch(uri);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch file: ${response.status}`);
+  }
+  const contentLength = response.headers.get("content-length");
+  if (contentLength && parseInt(contentLength, 10) > MAX_UPLOAD_BYTES) {
+    throw new Error(
+      `File is too large (${Math.round(parseInt(contentLength, 10) / 1024 / 1024)}MB). Maximum size is 10MB.`
+    );
+  }
+  const blob = await response.blob();
+  if (blob.size > MAX_UPLOAD_BYTES) {
+    throw new Error(
+      `File is too large (${Math.round(blob.size / 1024 / 1024)}MB). Maximum size is 10MB.`
+    );
+  }
+  return new File([blob], fallbackName || "upload", {
+    type: mimeType || "application/octet-stream"
+  });
+}
+
 export async function createDocumentFromText({ title, language, text }) {
   try {
     console.log("Calling backend:", `${BACKEND_URL}/documents`);
@@ -64,7 +88,8 @@ export async function createDocumentFromFile({
   name,
   inputType,
   mimeType,
-  file // For web: actual File object
+  file,
+  imagePages
 }) {
   const formData = new FormData();
 
@@ -72,81 +97,88 @@ export async function createDocumentFromFile({
   if (language) formData.append("language", language);
   formData.append("inputType", inputType);
 
-  // On web, we need a File/Blob object for FormData
-  // On native, use the {uri, name, type} format
+  const useMultiImage =
+    inputType === "image" &&
+    Array.isArray(imagePages) &&
+    imagePages.length > 0;
+
   if (Platform.OS === "web") {
-    let fileToUpload = file;
-    
-    console.log("Web file upload - checking file object:", { 
-      hasFile: !!file, 
-      hasUri: !!uri, 
-      uriType: uri?.substring(0, 20),
-      name,
-      fileSize: file?.size
-    });
-    
-    // Check file size limit (10MB for web uploads)
-    const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-    if (fileToUpload && fileToUpload.size > MAX_FILE_SIZE) {
-      throw new Error(`File is too large (${Math.round(fileToUpload.size / 1024 / 1024)}MB). Maximum size is 10MB.`);
-    }
-    
-    // If no file object provided, try to fetch from URI and convert to Blob
-    if (!fileToUpload && uri) {
-      try {
-        console.log("Fetching file from URI:", uri.substring(0, 50));
-        
-        // For blob: URLs, fetch directly
-        if (uri.startsWith("blob:")) {
-          const response = await fetch(uri);
-          if (!response.ok) {
-            throw new Error(`Failed to fetch file: ${response.status}`);
+    if (useMultiImage) {
+      for (let i = 0; i < imagePages.length; i++) {
+        const p = imagePages[i];
+        let fileToUpload = p.file;
+        if (!fileToUpload && p.uri) {
+          if (p.uri.startsWith("blob:") || p.uri.startsWith("data:")) {
+            fileToUpload = await webUriToFile(
+              p.uri,
+              p.name || `page_${i + 1}.jpg`,
+              p.mimeType || "image/jpeg"
+            );
+          } else {
+            throw new Error(
+              "Unsupported image URI. Please capture pages again."
+            );
           }
-          
-          // Check content length if available
-          const contentLength = response.headers.get("content-length");
-          if (contentLength && parseInt(contentLength) > MAX_FILE_SIZE) {
-            throw new Error(`File is too large (${Math.round(parseInt(contentLength) / 1024 / 1024)}MB). Maximum size is 10MB.`);
-          }
-          
-          const blob = await response.blob();
-          
-          // Check blob size
-          if (blob.size > MAX_FILE_SIZE) {
-            throw new Error(`File is too large (${Math.round(blob.size / 1024 / 1024)}MB). Maximum size is 10MB.`);
-          }
-          
-          fileToUpload = new File([blob], name || "upload", { type: mimeType || "application/octet-stream" });
-          console.log("Converted blob to File:", fileToUpload.size, "bytes");
-        } else if (uri.startsWith("data:")) {
-          // For data URLs, convert directly
-          const response = await fetch(uri);
-          const blob = await response.blob();
-          if (blob.size > MAX_FILE_SIZE) {
-            throw new Error(`File is too large (${Math.round(blob.size / 1024 / 1024)}MB). Maximum size is 10MB.`);
-          }
-          fileToUpload = new File([blob], name || "upload", { type: mimeType || "application/octet-stream" });
-        } else {
-          throw new Error("Unsupported file URI format. Please try selecting the file again.");
         }
-      } catch (e) {
-        console.error("Failed to convert URI to File:", e);
-        if (e.message.includes("too large")) {
-          throw e; // Re-throw size errors as-is
+        if (fileToUpload && fileToUpload.size > MAX_UPLOAD_BYTES) {
+          throw new Error(`Page ${i + 1} is too large (max 10MB per page).`);
         }
-        throw new Error(`Failed to read file: ${e.message}. Please try selecting the file again.`);
+        if (!fileToUpload) {
+          throw new Error(`Page ${i + 1} could not be read.`);
+        }
+        formData.append(
+          "files",
+          fileToUpload,
+          p.name || `page_${i + 1}.jpg`
+        );
       }
-    }
-    
-    if (fileToUpload) {
-      console.log("Appending file to FormData:", fileToUpload.name, fileToUpload.size, "bytes");
-      formData.append("file", fileToUpload, name || "upload");
     } else {
-      throw new Error("No file available to upload. Please select the file again.");
+      let fileToUpload = file;
+
+      if (fileToUpload && fileToUpload.size > MAX_UPLOAD_BYTES) {
+        throw new Error(
+          `File is too large (${Math.round(fileToUpload.size / 1024 / 1024)}MB). Maximum size is 10MB.`
+        );
+      }
+
+      if (!fileToUpload && uri) {
+        try {
+          if (uri.startsWith("blob:") || uri.startsWith("data:")) {
+            fileToUpload = await webUriToFile(
+              uri,
+              name || "upload",
+              mimeType || "application/octet-stream"
+            );
+          } else {
+            throw new Error(
+              "Unsupported file URI format. Please try selecting the file again."
+            );
+          }
+        } catch (e) {
+          if (e.message.includes("too large")) throw e;
+          throw new Error(
+            `Failed to read file: ${e.message}. Please try selecting the file again.`
+          );
+        }
+      }
+
+      if (!fileToUpload) {
+        throw new Error(
+          "No file available to upload. Please select the file again."
+        );
+      }
+
+      formData.append("file", fileToUpload, name || "upload");
     }
+  } else if (useMultiImage) {
+    imagePages.forEach((p, i) => {
+      formData.append("files", {
+        uri: p.uri,
+        name: p.name || `page_${i + 1}.jpg`,
+        type: p.mimeType || "image/jpeg"
+      });
+    });
   } else {
-    // Native: use React Native format
-    console.log("Native file upload:", { uri, name });
     formData.append("file", {
       uri,
       name: name || "upload",
@@ -154,32 +186,42 @@ export async function createDocumentFromFile({
     });
   }
 
+  const pageCount = useMultiImage ? imagePages.length : 1;
+  const uploadTimeoutMs = Math.min(
+    900000,
+    inputType === "image" ? 90000 + pageCount * 120000 : 120000
+  );
+
   try {
     console.log("Sending request to:", `${BACKEND_URL}/documents`);
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
-    
+    const timeoutId = setTimeout(() => controller.abort(), uploadTimeoutMs);
+
     const resp = await fetch(`${BACKEND_URL}/documents`, {
       method: "POST",
       signal: controller.signal,
-      // Don't set Content-Type header on web - let browser set it with boundary
-      headers: Platform.OS === "web" ? {} : {
-        "Content-Type": "multipart/form-data"
-      },
+      headers: {},
       body: formData
     });
-    
+
     clearTimeout(timeoutId);
     console.log("Response status:", resp.status);
-    
+
     return handleResponse(resp);
   } catch (e) {
     console.error("createDocumentFromFile error:", e);
     if (e.name === "AbortError") {
-      throw new Error("Upload timed out. The file may be too large or the server is not responding.");
+      throw new Error(
+        "Upload timed out. Try fewer pages or a stronger connection."
+      );
     }
-    if (e.message.includes("Failed to fetch") || e.message.includes("NetworkError")) {
-      throw new Error(`Cannot connect to backend at ${BACKEND_URL}. Is the server running?`);
+    if (
+      e.message.includes("Failed to fetch") ||
+      e.message.includes("NetworkError")
+    ) {
+      throw new Error(
+        `Cannot connect to backend at ${BACKEND_URL}. Is the server running?`
+      );
     }
     throw e;
   }

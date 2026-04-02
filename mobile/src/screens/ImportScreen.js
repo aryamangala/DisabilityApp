@@ -16,12 +16,14 @@ import ErrorBanner from "../components/ErrorBanner";
 import { useSettings } from "../context/SettingsContext";
 import { getTranslation } from "../utils/translations";
 
+const MAX_PHOTO_PAGES = 24;
+
 export default function ImportScreen() {
   const [selectedOption, setSelectedOption] = useState(null); // "photo", "text", "upload"
   const [title, setTitle] = useState("");
   const [textInput, setTextInput] = useState("");
   const [fileMeta, setFileMeta] = useState(null);
-  const [imageMeta, setImageMeta] = useState(null);
+  const [imagePages, setImagePages] = useState([]);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -48,6 +50,7 @@ export default function ImportScreen() {
 
   const onSelectPdf = async () => {
     setError("");
+    setImagePages([]);
     setFileMeta(null);
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -84,9 +87,12 @@ export default function ImportScreen() {
     }
   };
 
-  const onTakePhoto = async () => {
+  const capturePhotoPage = async () => {
+    if (imagePages.length >= MAX_PHOTO_PAGES) {
+      setError(t("maxPhotoPages"));
+      return;
+    }
     setError("");
-    setImageMeta(null);
     try {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== "granted") {
@@ -99,14 +105,22 @@ export default function ImportScreen() {
       });
       if (result.canceled) return;
       const asset = result.assets[0];
-      setImageMeta({
-        uri: asset.uri,
-        name: "photo.jpg",
-        mimeType: "image/jpeg"
-      });
+      setImagePages((prev) => [
+        ...prev,
+        {
+          uri: asset.uri,
+          name: `page_${prev.length + 1}.jpg`,
+          mimeType: "image/jpeg",
+          file: null
+        }
+      ]);
     } catch (e) {
       setError("Failed to open camera. Please try again.");
     }
+  };
+
+  const removePhotoPage = (index) => {
+    setImagePages((prev) => prev.filter((_, i) => i !== index));
   };
 
   const onProcess = async () => {
@@ -162,35 +176,38 @@ export default function ImportScreen() {
           }
         });
       } else if (selectedOption === "photo") {
-        if (!imageMeta) {
-          setError(t("error") + ": Please take a photo first.");
+        if (!imagePages.length) {
+          setError(t("error") + ": " + t("pleaseCaptureOnePage"));
           setSubmitting(false);
           return;
         }
-        
-        // On web, skip FileSystem check; on native, verify file exists
+
         if (Platform.OS !== "web") {
           try {
-            const info = await FileSystem.getInfoAsync(imageMeta.uri);
-            if (!info.exists) {
-              setError(t("error") + ": Captured image is not accessible.");
-              setSubmitting(false);
-              return;
+            for (const p of imagePages) {
+              const info = await FileSystem.getInfoAsync(p.uri);
+              if (!info.exists) {
+                setError(t("error") + ": Captured image is not accessible.");
+                setSubmitting(false);
+                return;
+              }
             }
           } catch (e) {
             console.warn("FileSystem check failed:", e);
           }
         }
-        
+
         navigation.navigate("Processing", {
           mode: "image",
           payload: {
             title: title || "Photo document",
             language: userLanguage || "es",
-            uri: imageMeta.uri,
-            name: imageMeta.name,
-            mimeType: imageMeta.mimeType,
-            file: imageMeta.file // Include file object for web if available
+            imagePages: imagePages.map(({ uri, name, mimeType, file }) => ({
+              uri,
+              name,
+              mimeType,
+              file
+            }))
           }
         });
       } else {
@@ -230,7 +247,10 @@ export default function ImportScreen() {
             style={styles.optionCard}
             onPress={async () => {
               setSelectedOption("photo");
-              await onTakePhoto();
+              setFileMeta(null);
+              if (imagePages.length === 0) {
+                await capturePhotoPage();
+              }
             }}
           >
             <View style={[styles.iconContainer, styles.iconOrange]}>
@@ -238,13 +258,16 @@ export default function ImportScreen() {
             </View>
             <View style={styles.optionTextContainer}>
               <Text style={styles.optionTitle}>{t("takePhoto")}</Text>
-              <Text style={styles.optionSubtitle}>{t("scanWithCamera")}</Text>
+              <Text style={styles.optionSubtitle}>{t("scanMultiplePages")}</Text>
             </View>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.optionCard}
-            onPress={() => setSelectedOption("text")}
+            onPress={() => {
+              setImagePages([]);
+              setSelectedOption("text");
+            }}
           >
             <View style={[styles.iconContainer, styles.iconYellow]}>
               <Text style={[styles.iconText, styles.iconTextT]}>T</Text>
@@ -258,6 +281,7 @@ export default function ImportScreen() {
           <TouchableOpacity
             style={styles.optionCard}
             onPress={async () => {
+              setImagePages([]);
               setSelectedOption("upload");
               await onSelectPdf();
             }}
@@ -321,25 +345,58 @@ export default function ImportScreen() {
             </View>
             {selectedOption === "upload" && fileMeta && (
               <View style={styles.fileInfo}>
-                <Text style={styles.fileLabel}>{t("uploadDocument")}: {fileMeta.name}</Text>
+                <Text style={styles.fileLabel}>
+                  {t("uploadDocument")}: {fileMeta.name}
+                </Text>
               </View>
             )}
-            {selectedOption === "photo" && imageMeta && (
-              <View style={styles.fileInfo}>
-                <Text style={styles.fileLabel}>{t("takePhoto")} ✓</Text>
+            {selectedOption === "photo" && (
+              <View style={styles.photoSection}>
+                {imagePages.map((p, index) => (
+                  <View key={`${p.uri}-${index}`} style={styles.pageRow}>
+                    <Text style={styles.pageRowLabel}>
+                      {t("pageLabel")} {index + 1}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => removePhotoPage(index)}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Text style={styles.removePageText}>{t("removePage")}</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+                <TouchableOpacity
+                  style={[
+                    styles.secondaryButton,
+                    (imagePages.length >= MAX_PHOTO_PAGES || submitting) &&
+                      styles.secondaryButtonDisabled
+                  ]}
+                  disabled={imagePages.length >= MAX_PHOTO_PAGES || submitting}
+                  onPress={capturePhotoPage}
+                >
+                  <Text style={styles.secondaryButtonText}>
+                    {imagePages.length === 0
+                      ? t("capturePage")
+                      : t("addAnotherPage")}
+                  </Text>
+                </TouchableOpacity>
+                <Text style={styles.pageHint}>
+                  {imagePages.length} / {MAX_PHOTO_PAGES}
+                </Text>
               </View>
             )}
             <TouchableOpacity
               style={[
                 styles.primaryButton,
                 submitting && styles.primaryButtonDisabled,
-                ((selectedOption === "upload" && !fileMeta) || 
-                 (selectedOption === "photo" && !imageMeta)) && styles.primaryButtonDisabled
+                ((selectedOption === "upload" && !fileMeta) ||
+                  (selectedOption === "photo" && !imagePages.length)) &&
+                  styles.primaryButtonDisabled
               ]}
               disabled={
-                submitting || 
+                submitting ||
                 (selectedOption === "upload" && !fileMeta) ||
-                (selectedOption === "photo" && !imageMeta)
+                (selectedOption === "photo" && !imagePages.length)
               }
               onPress={onProcess}
             >
@@ -485,6 +542,54 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: "#D1D5DB"
+  },
+  photoSection: {
+    marginBottom: 16
+  },
+  pageRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#E8DCC6",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 8
+  },
+  pageRowLabel: {
+    fontSize: 14,
+    color: "#2C2C2C",
+    fontWeight: "600"
+  },
+  removePageText: {
+    fontSize: 14,
+    color: "#B42318",
+    fontWeight: "600"
+  },
+  secondaryButton: {
+    backgroundColor: "#D4C4A8",
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    alignItems: "center",
+    marginTop: 4,
+    marginBottom: 8
+  },
+  secondaryButtonDisabled: {
+    opacity: 0.45
+  },
+  secondaryButtonText: {
+    color: "#2C2C2C",
+    fontWeight: "700",
+    fontSize: 15
+  },
+  pageHint: {
+    fontSize: 12,
+    color: "#6B7280",
+    textAlign: "center",
+    marginBottom: 4
   },
   primaryButton: {
     backgroundColor: "#B42318",
