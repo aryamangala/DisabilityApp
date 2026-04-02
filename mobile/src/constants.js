@@ -1,12 +1,22 @@
 import { Platform } from "react-native";
+import Constants from "expo-constants";
 
-// Optional override for LAN/physical device testing, e.g. EXPO_PUBLIC_BACKEND_URL=http://192.168.1.20:4000
-const envBackendUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
+function normalizeBaseUrl(url) {
+	if (!url || typeof url !== "string") return url;
+	return url.trim().replace(/\/+$/, "");
+}
 
-const defaultBackendUrl = Platform.select({
-	android: "http://10.0.2.2:4000",
-	default: "http://localhost:4000"
-});
+// EAS / Metro: EXPO_PUBLIC_BACKEND_URL overrides everything (set in eas.json or .env).
+const envBackendUrl = normalizeBaseUrl(process.env.EXPO_PUBLIC_BACKEND_URL);
 
-export const BACKEND_URL = envBackendUrl || defaultBackendUrl;
+// app.config.js extra.backendUrl — baked into dev client and release builds.
+const extraBackendUrl = normalizeBaseUrl(Constants.expoConfig?.extra?.backendUrl);
 
+const localDefault = normalizeBaseUrl(
+	Platform.select({
+		android: "http://10.0.2.2:4000",
+		default: "http://localhost:4000",
+	})
+);
+
+export const BACKEND_URL = envBackendUrl || extraBackendUrl || localDefault;

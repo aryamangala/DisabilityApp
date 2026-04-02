@@ -1,17 +1,31 @@
 import OpenAI from "openai";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
+// Lazy init: Railway must set OPENAI_API_KEY on the *service* (Variables). Constructing
+// OpenAI at import time crashes the process before the server can boot if the key is missing.
+let openaiSingleton;
+
+function getOpenAI() {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey) {
+    const err = new Error(
+      "OPENAI_API_KEY is missing. Railway → your backend service → Variables → add OPENAI_API_KEY=sk-... → Redeploy (project-level vars do not apply unless linked to this service)."
+    );
+    err.name = "ConfigurationError";
+    throw err;
+  }
+  openaiSingleton ??= new OpenAI({ apiKey });
+  return openaiSingleton;
+}
+
+if (!process.env.OPENAI_API_KEY?.trim()) {
+  console.warn(
+    "OPENAI_API_KEY is not set — AI routes will fail until you add it under this service's Variables on Railway."
+  );
+}
 
 // Use gpt-4o for better quality EasyRead conversion
 // Can be changed to "gpt-4o-mini" for lower cost/faster speed
 const TEXT_MODEL = process.env.OPENAI_MODEL || "gpt-4o";
-
-// Check if OpenAI API key is set
-if (!process.env.OPENAI_API_KEY) {
-  console.error("WARNING: OPENAI_API_KEY is not set in environment variables!");
-}
 
 // Helper function to sleep/delay
 function sleep(ms) {
@@ -90,7 +104,7 @@ async function callJsonModelWithRetry(systemPrompt, userContent, schemaDescripti
         await sleep(delay);
       }
 
-      const response = await openai.chat.completions.create({
+      const response = await getOpenAI().chat.completions.create({
         model: TEXT_MODEL,
         messages: baseMessages,
         temperature: 0.3,
@@ -117,7 +131,7 @@ async function callJsonModelWithRetry(systemPrompt, userContent, schemaDescripti
           }
         ];
 
-        const repairResp = await openai.chat.completions.create({
+        const repairResp = await getOpenAI().chat.completions.create({
           model: TEXT_MODEL,
           messages: repairMessages,
           temperature: 0,
@@ -178,7 +192,7 @@ export async function ocrImageToText(imageBase64, mimeType) {
       }
     ];
 
-    const response = await openai.chat.completions.create({
+    const response = await getOpenAI().chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         { role: "system", content: systemPrompt },
