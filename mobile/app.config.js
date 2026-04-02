@@ -1,11 +1,13 @@
 /**
  * Public API URL must be reachable from real devices (HTTPS).
  * `*.railway.internal` is only for other Railway services, not phones or browsers.
- * If requests fail, copy the exact "Public Networking" URL from Railway (often *.up.railway.app).
+ * Change the URL in `defaultPublicBackend.json` (and keep `eas.json` in sync for EAS builds).
  */
+// eslint-disable-next-line import/no-commonjs -- app.config is evaluated in Node by Expo CLI
+const { backendUrl: fallbackFromFile } = require("./defaultPublicBackend.json");
+
 const defaultRemoteBackend =
-  process.env.EXPO_PUBLIC_BACKEND_URL?.trim() ||
-  "https://disabilityapp.up.railway.app";
+  process.env.EXPO_PUBLIC_BACKEND_URL?.trim() || fallbackFromFile;
 
 export default {
   expo: {

@@ -1,16 +1,37 @@
 import { Platform } from "react-native";
 import Constants from "expo-constants";
 
+import defaults from "../defaultPublicBackend.json";
+
 function normalizeBaseUrl(url) {
 	if (!url || typeof url !== "string") return url;
 	return url.trim().replace(/\/+$/, "");
 }
 
-// EAS / Metro: EXPO_PUBLIC_BACKEND_URL overrides everything (set in eas.json or .env).
+/** Resolve `extra` — Expo Go + Metro sometimes omit `expoConfig.extra`; try fallbacks. */
+function readConfigExtra() {
+	const ec = Constants.expoConfig;
+	if (ec?.extra && typeof ec.extra === "object") {
+		return ec.extra;
+	}
+	const m = Constants.manifest;
+	if (m?.extra && typeof m.extra === "object") {
+		return m.extra;
+	}
+	const m2 = Constants.manifest2;
+	const nested = m2?.extra?.expoClient?.extra;
+	if (nested && typeof nested === "object") {
+		return nested;
+	}
+	return null;
+}
+
+// EAS / Metro: .env or eas.json (inlined at bundle time).
 const envBackendUrl = normalizeBaseUrl(process.env.EXPO_PUBLIC_BACKEND_URL);
 
-// app.config.js extra.backendUrl — baked into dev client and release builds.
-const extraBackendUrl = normalizeBaseUrl(Constants.expoConfig?.extra?.backendUrl);
+const extraBackendUrl = normalizeBaseUrl(readConfigExtra()?.backendUrl);
+
+const fileDefaultBackendUrl = normalizeBaseUrl(defaults.backendUrl);
 
 const localDefault = normalizeBaseUrl(
 	Platform.select({
@@ -19,4 +40,14 @@ const localDefault = normalizeBaseUrl(
 	})
 );
 
-export const BACKEND_URL = envBackendUrl || extraBackendUrl || localDefault;
+// Prefer env → manifest extra → bundled JSON default → local (simulator only).
+// Without the JSON default, Expo Go on a real device often fell back to localhost and every fetch failed.
+export const BACKEND_URL =
+	envBackendUrl ||
+	extraBackendUrl ||
+	fileDefaultBackendUrl ||
+	localDefault;
+
+if (__DEV__) {
+	console.log("[EasyRead] BACKEND_URL =", BACKEND_URL);
+}
