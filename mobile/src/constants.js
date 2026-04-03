@@ -2,6 +2,7 @@ import { Platform } from "react-native";
 import Constants from "expo-constants";
 
 import defaults from "../defaultPublicBackend.json";
+import { isStaleRailwayBackendUrl } from "./backendUrlEnv";
 
 function normalizeBaseUrl(url) {
 	if (!url || typeof url !== "string") return url;
@@ -27,9 +28,20 @@ function readConfigExtra() {
 }
 
 // EAS / Metro: .env or eas.json (inlined at bundle time).
-const envBackendUrl = normalizeBaseUrl(process.env.EXPO_PUBLIC_BACKEND_URL);
+const rawEnvBackend = process.env.EXPO_PUBLIC_BACKEND_URL;
+if (__DEV__ && isStaleRailwayBackendUrl(rawEnvBackend)) {
+	console.warn(
+		"[EasyRead] EXPO_PUBLIC_BACKEND_URL points at a retired Railway host; using defaultPublicBackend.json instead."
+	);
+}
+const envBackendUrl = normalizeBaseUrl(
+	isStaleRailwayBackendUrl(rawEnvBackend) ? undefined : rawEnvBackend
+);
 
-const extraBackendUrl = normalizeBaseUrl(readConfigExtra()?.backendUrl);
+const rawExtraBackend = readConfigExtra()?.backendUrl;
+const extraBackendUrl = normalizeBaseUrl(
+  isStaleRailwayBackendUrl(rawExtraBackend) ? undefined : rawExtraBackend
+);
 
 const fileDefaultBackendUrl = normalizeBaseUrl(defaults.backendUrl);
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -10,7 +10,8 @@ import {
   Pressable
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { useNavigation } from "@react-navigation/native";
+import * as Speech from "expo-speech";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 
 import { useDocument } from "../context/DocumentContext";
 import { useSettings } from "../context/SettingsContext";
@@ -126,8 +127,55 @@ export default function ReaderScreen() {
   const [error, setError] = useState("");
   const [isOriginalExpanded, setIsOriginalExpanded] = useState(false);
   const [selectedKeyTerm, setSelectedKeyTerm] = useState(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
 
   const cached = chunksCache[currentChunkIndex];
+
+  const easyReadSpeechText = useMemo(() => {
+    const er = cached?.easyread;
+    if (!er) return "";
+    const bits = [];
+    if (er.title?.trim()) bits.push(er.title.trim());
+    if (Array.isArray(er.sentences)) {
+      er.sentences.forEach((s) => {
+        if (s && String(s).trim()) bits.push(String(s).trim());
+      });
+    }
+    return bits.join(". ");
+  }, [cached?.easyread]);
+
+  const speechLanguage = language === "en" ? "en-US" : "es-ES";
+
+  const stopSpeaking = useCallback(() => {
+    Speech.stop();
+    setIsSpeaking(false);
+  }, []);
+
+  const onReadOutPress = useCallback(async () => {
+    const text = easyReadSpeechText.trim();
+    if (!text) return;
+    try {
+      const speaking = await Speech.isSpeakingAsync();
+      if (speaking || isSpeaking) {
+        stopSpeaking();
+        return;
+      }
+    } catch {
+      if (isSpeaking) {
+        stopSpeaking();
+        return;
+      }
+    }
+    setIsSpeaking(true);
+    Speech.speak(text, {
+      language: speechLanguage,
+      rate: 0.92,
+      pitch: 1,
+      onDone: () => setIsSpeaking(false),
+      onStopped: () => setIsSpeaking(false),
+      onError: () => setIsSpeaking(false)
+    });
+  }, [easyReadSpeechText, speechLanguage, isSpeaking, stopSpeaking]);
 
   useEffect(() => {
     let cancelled = false;
@@ -161,11 +209,22 @@ export default function ReaderScreen() {
     };
   }, [docId, chunkCount, currentChunkIndex, setChunkInCache, chunksCache]);
 
-  // Reset expanded state when chunk changes
+  // Reset expanded state and stop TTS when chunk changes
   useEffect(() => {
     setIsOriginalExpanded(false);
     setSelectedKeyTerm(null);
+    Speech.stop();
+    setIsSpeaking(false);
   }, [currentChunkIndex]);
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        Speech.stop();
+        setIsSpeaking(false);
+      };
+    }, [])
+  );
 
   const onKeyTermPress = ({ term, definition, sentenceIndex }) => {
     setSelectedKeyTerm({ term, definition, sentenceIndex });
@@ -258,6 +317,30 @@ export default function ReaderScreen() {
 
   const summaryKeyTerms = getUniqueKeyTerms(cached?.easyread?.keyTerms);
 
+  const renderReadOutButton = () => {
+    if (!cached?.easyread?.sentences?.length || !easyReadSpeechText.trim()) {
+      return null;
+    }
+    return (
+      <TouchableOpacity
+        style={[styles.readOutButton, !isDark && styles.readOutButtonLight]}
+        onPress={onReadOutPress}
+        activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel={isSpeaking ? t("stopReading") : t("readOutLoud")}
+      >
+        <Text style={styles.readOutIcon} accessibilityLabel="">
+          {isSpeaking ? "⏹" : "🔊"}
+        </Text>
+        <Text
+          style={[styles.readOutButtonText, !isDark && styles.readOutButtonTextLight]}
+        >
+          {isSpeaking ? t("stopReading") : t("readOutLoud")}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <View style={[styles.container, !isDark && styles.containerLight]}>
       <ChunkProgress current={currentChunkIndex} total={chunkCount} />
@@ -328,6 +411,7 @@ export default function ReaderScreen() {
                   <Text style={styles.summaryTitle}>{t("simpleSummary")}</Text>
                 </View>
                 <View style={styles.summaryContent}>
+                  {renderReadOutButton()}
                   {!cached.easyread && loading ? (
                     <View style={styles.loadingContainer}>
                       <ActivityIndicator size="small" color="white" />
@@ -380,6 +464,7 @@ export default function ReaderScreen() {
                   <Text style={[styles.summaryTitle, styles.summaryTitleLight]}>{t("simpleSummary")}</Text>
                 </View>
                 <View style={styles.summaryContent}>
+                {renderReadOutButton()}
                 {!cached.easyread && loading ? (
                   <View style={styles.loadingContainer}>
                     <ActivityIndicator size="small" color="#8F2D12" />
@@ -631,6 +716,34 @@ const styles = StyleSheet.create({
   },
   summaryContent: {
     marginTop: 8
+  },
+  readOutButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    alignSelf: "flex-start",
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: "rgba(255, 255, 255, 0.22)",
+    marginBottom: 12
+  },
+  readOutButtonLight: {
+    backgroundColor: "#FBE4DD",
+    borderWidth: 1.5,
+    borderColor: "#8F2D12"
+  },
+  readOutIcon: {
+    fontSize: 18
+  },
+  readOutButtonText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "white"
+  },
+  readOutButtonTextLight: {
+    color: "#8F2D12"
   },
   summarySectionLight: {
     backgroundColor: "#FFFFFF",

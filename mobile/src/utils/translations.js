@@ -33,6 +33,8 @@ export const translations = {
     // Reader Screen
     originalText: "ORIGINAL TEXT",
     simpleSummary: "SIMPLE SUMMARY",
+    readOutLoud: "Read out",
+    stopReading: "Stop",
     tapToViewFull: "Tap to view full text",
     iUnderstand: "I Understand. Test Me",
     previousChunk: "← Previous chunk",
@@ -145,6 +147,8 @@ export const translations = {
     // Reader Screen
     originalText: "TEXTO ORIGINAL",
     simpleSummary: "RESUMEN SIMPLE",
+    readOutLoud: "Leer en voz alta",
+    stopReading: "Detener",
     tapToViewFull: "Toca para ver el texto completo",
     iUnderstand: "Entiendo. Poner a Prueba",
     previousChunk: "← Fragmento anterior",

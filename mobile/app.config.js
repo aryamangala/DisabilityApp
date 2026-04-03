@@ -5,9 +5,11 @@
  */
 // eslint-disable-next-line import/no-commonjs -- app.config is evaluated in Node by Expo CLI
 const { backendUrl: fallbackFromFile } = require("./defaultPublicBackend.json");
+const { isStaleRailwayBackendUrl } = require("./src/backendUrlEnv.js");
 
+const envRaw = process.env.EXPO_PUBLIC_BACKEND_URL?.trim();
 const defaultRemoteBackend =
-  process.env.EXPO_PUBLIC_BACKEND_URL?.trim() || fallbackFromFile;
+  envRaw && !isStaleRailwayBackendUrl(envRaw) ? envRaw : fallbackFromFile;
 
 export default {
   expo: {
