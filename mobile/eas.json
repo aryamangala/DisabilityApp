@@ -8,18 +8,18 @@
       "developmentClient": true,
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://disabilityapp.up.railway.app"
+        "EXPO_PUBLIC_BACKEND_URL": "https://disabilityapp-production.up.railway.app"
       }
     },
     "preview": {
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://disabilityapp.up.railway.app"
+        "EXPO_PUBLIC_BACKEND_URL": "https://disabilityapp-production.up.railway.app"
       }
     },
     "production": {
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://disabilityapp.up.railway.app"
+        "EXPO_PUBLIC_BACKEND_URL": "https://disabilityapp-production.up.railway.app"
       }
     }
   },
