@@ -135,47 +135,50 @@ export default function ReaderScreen() {
     const er = cached?.easyread;
     if (!er) return "";
     const bits = [];
-    if (er.title?.trim()) bits.push(er.title.trim());
+    const title = typeof er.title === "string" ? er.title.trim() : "";
+    if (title) bits.push(title);
     if (Array.isArray(er.sentences)) {
       er.sentences.forEach((s) => {
-        if (s && String(s).trim()) bits.push(String(s).trim());
+        const str = typeof s === "string" ? s : s != null ? String(s) : "";
+        const line = str.replace(/\s+/g, " ").trim();
+        if (line) bits.push(line);
       });
     }
     return bits.join(". ");
   }, [cached?.easyread]);
 
-  const speechLanguage = language === "en" ? "en-US" : "es-ES";
+  // Easy Read JSON from the API is always Spanish (see backend generateEasyRead).
+  // Using en-US for that text often fails or sounds broken on iOS; keep TTS locale aligned with content.
+  const easyReadSpeechLanguage = "es-ES";
 
   const stopSpeaking = useCallback(() => {
     Speech.stop();
     setIsSpeaking(false);
   }, []);
 
-  const onReadOutPress = useCallback(async () => {
+  const onReadOutPress = useCallback(() => {
     const text = easyReadSpeechText.trim();
     if (!text) return;
-    try {
-      const speaking = await Speech.isSpeakingAsync();
-      if (speaking || isSpeaking) {
-        stopSpeaking();
-        return;
-      }
-    } catch {
-      if (isSpeaking) {
-        stopSpeaking();
-        return;
-      }
+
+    if (isSpeaking) {
+      stopSpeaking();
+      return;
     }
+
+    Speech.stop();
     setIsSpeaking(true);
     Speech.speak(text, {
-      language: speechLanguage,
-      rate: 0.92,
+      language: easyReadSpeechLanguage,
+      rate: 0.72,
       pitch: 1,
       onDone: () => setIsSpeaking(false),
       onStopped: () => setIsSpeaking(false),
-      onError: () => setIsSpeaking(false)
+      onError: (e) => {
+        if (__DEV__) console.warn("expo-speech error:", e);
+        setIsSpeaking(false);
+      }
     });
-  }, [easyReadSpeechText, speechLanguage, isSpeaking, stopSpeaking]);
+  }, [easyReadSpeechText, easyReadSpeechLanguage, isSpeaking, stopSpeaking]);
 
   useEffect(() => {
     let cancelled = false;

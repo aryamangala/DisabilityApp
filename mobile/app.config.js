@@ -22,6 +22,11 @@ export default {
     ios: {
       bundleIdentifier: "com.easyread.app",
       supportsTablet: true,
+      infoPlist: {
+        NSLocalNetworkUsageDescription:
+          "EasyRead uses your local network in debug builds to load JavaScript from the development server on your Mac.",
+        NSBonjourServices: ["_expo-development-server._tcp"],
+      },
     },
     android: {
       package: "com.easyread.app",

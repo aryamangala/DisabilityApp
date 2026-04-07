@@ -187,16 +187,21 @@ export async function createDocumentFromFile({
   }
 
   const pageCount = useMultiImage ? imagePages.length : 1;
-  const uploadTimeoutMs = Math.min(
-    900000,
-    inputType === "image" ? 90000 + pageCount * 120000 : 120000
-  );
+  // Server runs OCR (OpenAI) per page before HTTP responds — must cover upload + all pages.
+  const uploadTimeoutMs =
+    inputType === "image"
+      ? Math.min(1_800_000, 120_000 + pageCount * 240_000) // up to 30 min; ~4 min/page
+      : 180_000; // PDF parse is local on server; 3 min is enough for upload + parse
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), uploadTimeoutMs);
 
   try {
-    console.log("Sending request to:", `${BACKEND_URL}/documents`);
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), uploadTimeoutMs);
-
+    console.log("[EasyRead] POST /documents →", BACKEND_URL, {
+      inputType,
+      pages: pageCount,
+      timeoutMs: uploadTimeoutMs
+    });
     const resp = await fetch(`${BACKEND_URL}/documents`, {
       method: "POST",
       signal: controller.signal,
@@ -204,7 +209,6 @@ export async function createDocumentFromFile({
       body: formData
     });
 
-    clearTimeout(timeoutId);
     console.log("Response status:", resp.status);
 
     return handleResponse(resp);
@@ -212,7 +216,7 @@ export async function createDocumentFromFile({
     console.error("createDocumentFromFile error:", e);
     if (e.name === "AbortError") {
       throw new Error(
-        "Upload timed out. Try fewer pages or a stronger connection."
+        "This is taking too long (reading photos on the server can be slow). Try fewer or clearer pages, use Wi‑Fi, or try again in a moment."
       );
     }
     if (
@@ -224,6 +228,8 @@ export async function createDocumentFromFile({
       );
     }
     throw e;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 

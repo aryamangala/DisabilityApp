@@ -27,6 +27,9 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 4000;
 
+// Railway / reverse proxy: correct client IP for logs and rate limits
+app.set("trust proxy", 1);
+
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
@@ -42,6 +45,22 @@ const documentUpload = upload.fields([
   { name: "file", maxCount: 1 },
   { name: "files", maxCount: 24 }
 ]);
+
+function documentUploadWithErrorLogging(req, res, next) {
+  documentUpload(req, res, (err) => {
+    if (err) {
+      console.error("[POST /documents] multer error:", err.code || err.name, err.message);
+      const status = err.code === "LIMIT_FILE_SIZE" ? 413 : 400;
+      return res.status(status).json({
+        error:
+          err.code === "LIMIT_FILE_SIZE"
+            ? "One or more files exceed the 10MB per-file limit."
+            : err.message || "Upload could not be read."
+      });
+    }
+    next();
+  });
+}
 
 // More lenient rate limiting for development/testing
 // Increase limits significantly to avoid blocking during testing
@@ -408,7 +427,17 @@ app.get("/test-openai", async (req, res) => {
 
 app.post(
   "/documents",
-  documentUpload,
+  (req, res, next) => {
+    console.log("[POST /documents] request started", {
+      ts: new Date().toISOString(),
+      contentType: req.headers["content-type"],
+      contentLength: req.headers["content-length"],
+      ip: req.ip,
+      host: req.headers.host
+    });
+    next();
+  },
+  documentUploadWithErrorLogging,
   async (req, res) => {
     try {
       const contentType = req.headers["content-type"] || "";

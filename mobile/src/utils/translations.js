@@ -28,7 +28,7 @@ export const translations = {
     enterTitle: "Enter document title",
     language: "Language",
     processDocument: "Process Document",
-    back: "← Back",
+    back: "Back",
     
     // Reader Screen
     originalText: "ORIGINAL TEXT",
@@ -142,7 +142,7 @@ export const translations = {
     enterTitle: "Ingresa el título del documento",
     language: "Idioma",
     processDocument: "Procesar Documento",
-    back: "← Atrás",
+    back: "Atrás",
     
     // Reader Screen
     originalText: "TEXTO ORIGINAL",

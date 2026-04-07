@@ -1,16 +1,17 @@
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import {
   View,
   Text,
   StyleSheet,
   TextInput,
   TouchableOpacity,
-  Platform
+  Platform,
+  BackHandler
 } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useFocusEffect } from "@react-navigation/native";
 
 import ErrorBanner from "../components/ErrorBanner";
 import { useSettings } from "../context/SettingsContext";
@@ -30,6 +31,28 @@ export default function ImportScreen() {
   const navigation = useNavigation();
   const { language: userLanguage } = useSettings();
   const t = (key) => getTranslation(key, userLanguage);
+
+  // After Processing, the stack may be [Import, Reader]; popping Reader leaves Import as root,
+  // so goBack() would fail. Fall back to Landing when there is no history.
+  const onBack = () => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+    } else {
+      navigation.navigate("Landing");
+    }
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS !== "android") return undefined;
+      const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+        if (navigation.canGoBack()) return false;
+        navigation.navigate("Landing");
+        return true;
+      });
+      return () => sub.remove();
+    }, [navigation])
+  );
 
   // For manual text imports, derive a readable title if the title field is blank.
   const buildManualTextTitle = () => {
@@ -228,7 +251,7 @@ export default function ImportScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
+        <TouchableOpacity onPress={onBack}>
           <Text style={styles.backArrow}>←</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{t("addDocument")}</Text>
