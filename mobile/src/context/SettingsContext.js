@@ -10,7 +10,7 @@ const SettingsContext = createContext(null);
 export function SettingsProvider({ children }) {
   const [textSize, setTextSize] = useState("medium"); // small, medium, large, xlarge
   const [language, setLanguage] = useState("es"); // es (Spanish) or en (English)
-  const [theme, setTheme] = useState("dark"); // dark (default/current) or light
+  const [theme, setTheme] = useState("light"); // light (default) or dark
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -21,7 +21,7 @@ export function SettingsProvider({ children }) {
           const parsed = JSON.parse(stored);
           setTextSize(parsed.textSize || "medium");
           setLanguage(parsed.language || "es");
-          setTheme(parsed.theme === "light" ? "light" : "dark");
+          setTheme(parsed.theme === "dark" ? "dark" : "light");
         }
       } catch (e) {
         devWarn("Failed to restore settings:", e.message);
