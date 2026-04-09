@@ -6,7 +6,9 @@ import {
   TextInput,
   TouchableOpacity,
   Platform,
-  BackHandler
+  BackHandler,
+  ScrollView,
+  KeyboardAvoidingView
 } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
@@ -313,181 +315,191 @@ export default function ImportScreen() {
         <View style={styles.headerSpacer} />
       </View>
 
-      <ErrorBanner message={error} />
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoid}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator
+        >
+          <ErrorBanner message={error} />
 
-      <View style={styles.content}>
-        <Text style={styles.instruction}>
-          {t("chooseImportMethod")}
-        </Text>
+          <Text style={styles.instruction}>
+            {t("chooseImportMethod")}
+          </Text>
 
-        <View style={styles.optionsContainer}>
-          <TouchableOpacity
-            style={styles.optionCard}
-            onPress={async () => {
-              setSelectedOption("photo");
-              setFileMeta(null);
-              if (imagePages.length === 0) {
-                await capturePhotoPage();
-              }
-            }}
-          >
-            <View style={[styles.iconContainer, styles.iconOrange]}>
-              <Text style={styles.iconText}>📷</Text>
-            </View>
-            <View style={styles.optionTextContainer}>
-              <Text style={styles.optionTitle}>{t("takePhoto")}</Text>
-              <Text style={styles.optionSubtitle}>{t("scanMultiplePages")}</Text>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.optionCard}
-            onPress={() => {
-              setImagePages([]);
-              setSelectedOption("text");
-            }}
-          >
-            <View style={[styles.iconContainer, styles.iconYellow]}>
-              <Text style={[styles.iconText, styles.iconTextT]}>T</Text>
-            </View>
-            <View style={styles.optionTextContainer}>
-              <Text style={styles.optionTitle}>{t("manualText")}</Text>
-              <Text style={styles.optionSubtitle}>{t("pasteOrType")}</Text>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.optionCard}
-            onPress={async () => {
-              setImagePages([]);
-              setSelectedOption("upload");
-              await onSelectPdf();
-            }}
-          >
-            <View style={[styles.iconContainer, styles.iconRed]}>
-              <Text style={styles.iconText}>📄</Text>
-            </View>
-            <View style={styles.optionTextContainer}>
-              <Text style={styles.optionTitle}>{t("uploadDocument")}</Text>
-              <Text style={styles.optionSubtitle}>{t("importFiles")}</Text>
-            </View>
-          </TouchableOpacity>
-        </View>
-
-        {selectedOption === "text" && (
-          <View style={styles.inputSection}>
-            <View style={styles.field}>
-              <Text style={styles.label}>{t("documentTitle")}</Text>
-              <TextInput
-                style={styles.input}
-                placeholder={t("enterTitle")}
-                value={title}
-                onChangeText={setTitle}
-              />
-            </View>
-            <View style={styles.field}>
-              <Text style={styles.label}>{t("pasteOrType")}</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                placeholder={t("pasteOrType") + "..."}
-                value={textInput}
-                onChangeText={setTextInput}
-                multiline
-              />
-            </View>
+          <View style={styles.optionsContainer}>
             <TouchableOpacity
-              style={[
-                styles.primaryButton,
-                submitting && styles.primaryButtonDisabled
-              ]}
-              disabled={submitting || !textInput.trim()}
-              onPress={onProcess}
+              style={styles.optionCard}
+              onPress={async () => {
+                setSelectedOption("photo");
+                setFileMeta(null);
+                if (imagePages.length === 0) {
+                  await capturePhotoPage();
+                }
+              }}
             >
-              <Text style={styles.primaryButtonText}>
-                {submitting ? t("loading") : t("processDocument")}
-              </Text>
+              <View style={[styles.iconContainer, styles.iconOrange]}>
+                <Text style={styles.iconText}>📷</Text>
+              </View>
+              <View style={styles.optionTextContainer}>
+                <Text style={styles.optionTitle}>{t("takePhoto")}</Text>
+                <Text style={styles.optionSubtitle}>{t("scanMultiplePages")}</Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.optionCard}
+              onPress={() => {
+                setImagePages([]);
+                setSelectedOption("text");
+              }}
+            >
+              <View style={[styles.iconContainer, styles.iconYellow]}>
+                <Text style={[styles.iconText, styles.iconTextT]}>T</Text>
+              </View>
+              <View style={styles.optionTextContainer}>
+                <Text style={styles.optionTitle}>{t("manualText")}</Text>
+                <Text style={styles.optionSubtitle}>{t("pasteOrType")}</Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.optionCard}
+              onPress={async () => {
+                setImagePages([]);
+                setSelectedOption("upload");
+                await onSelectPdf();
+              }}
+            >
+              <View style={[styles.iconContainer, styles.iconRed]}>
+                <Text style={styles.iconText}>📄</Text>
+              </View>
+              <View style={styles.optionTextContainer}>
+                <Text style={styles.optionTitle}>{t("uploadDocument")}</Text>
+                <Text style={styles.optionSubtitle}>{t("importFiles")}</Text>
+              </View>
             </TouchableOpacity>
           </View>
-        )}
 
-        {(selectedOption === "upload" || selectedOption === "photo") && (
-          <View style={styles.inputSection}>
-            <View style={styles.field}>
-              <Text style={styles.label}>{t("documentTitle")}</Text>
-              <TextInput
-                style={styles.input}
-                placeholder={t("enterTitle")}
-                value={title}
-                onChangeText={setTitle}
-              />
-            </View>
-            {selectedOption === "upload" && fileMeta && (
-              <View style={styles.fileInfo}>
-                <Text style={styles.fileLabel}>
-                  {t("uploadDocument")}: {fileMeta.name}
-                </Text>
+          {selectedOption === "text" && (
+            <View style={styles.inputSection}>
+              <View style={styles.field}>
+                <Text style={styles.label}>{t("documentTitle")}</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder={t("enterTitle")}
+                  value={title}
+                  onChangeText={setTitle}
+                />
               </View>
-            )}
-            {selectedOption === "photo" && (
-              <View style={styles.photoSection}>
-                {imagePages.map((p, index) => (
-                  <View key={`${p.uri}-${index}`} style={styles.pageRow}>
-                    <Text style={styles.pageRowLabel}>
-                      {t("pageLabel")} {index + 1}
-                    </Text>
-                    <TouchableOpacity
-                      onPress={() => removePhotoPage(index)}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                      <Text style={styles.removePageText}>{t("removePage")}</Text>
-                    </TouchableOpacity>
-                  </View>
-                ))}
-                <TouchableOpacity
-                  style={[
-                    styles.secondaryButton,
-                    (imagePages.length >= MAX_PHOTO_PAGES || submitting) &&
-                      styles.secondaryButtonDisabled
-                  ]}
-                  disabled={imagePages.length >= MAX_PHOTO_PAGES || submitting}
-                  onPress={capturePhotoPage}
-                >
-                  <Text style={styles.secondaryButtonText}>
-                    {imagePages.length === 0
-                      ? t("capturePage")
-                      : t("addAnotherPage")}
+              <View style={styles.field}>
+                <Text style={styles.label}>{t("pasteOrType")}</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  placeholder={t("pasteOrType") + "..."}
+                  value={textInput}
+                  onChangeText={setTextInput}
+                  multiline
+                />
+              </View>
+              <TouchableOpacity
+                style={[
+                  styles.primaryButton,
+                  submitting && styles.primaryButtonDisabled
+                ]}
+                disabled={submitting || !textInput.trim()}
+                onPress={onProcess}
+              >
+                <Text style={styles.primaryButtonText}>
+                  {submitting ? t("loading") : t("processDocument")}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {(selectedOption === "upload" || selectedOption === "photo") && (
+            <View style={styles.inputSection}>
+              <View style={styles.field}>
+                <Text style={styles.label}>{t("documentTitle")}</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder={t("enterTitle")}
+                  value={title}
+                  onChangeText={setTitle}
+                />
+              </View>
+              {selectedOption === "upload" && fileMeta && (
+                <View style={styles.fileInfo}>
+                  <Text style={styles.fileLabel}>
+                    {t("uploadDocument")}: {fileMeta.name}
                   </Text>
-                </TouchableOpacity>
-                <Text style={styles.pageHint}>
-                  {imagePages.length} / {MAX_PHOTO_PAGES}
+                </View>
+              )}
+              {selectedOption === "photo" && (
+                <View style={styles.photoSection}>
+                  {imagePages.map((p, index) => (
+                    <View key={`${p.uri}-${index}`} style={styles.pageRow}>
+                      <Text style={styles.pageRowLabel}>
+                        {t("pageLabel")} {index + 1}
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() => removePhotoPage(index)}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Text style={styles.removePageText}>{t("removePage")}</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                  <TouchableOpacity
+                    style={[
+                      styles.secondaryButton,
+                      (imagePages.length >= MAX_PHOTO_PAGES || submitting) &&
+                        styles.secondaryButtonDisabled
+                    ]}
+                    disabled={imagePages.length >= MAX_PHOTO_PAGES || submitting}
+                    onPress={capturePhotoPage}
+                  >
+                    <Text style={styles.secondaryButtonText}>
+                      {imagePages.length === 0
+                        ? t("capturePage")
+                        : t("addAnotherPage")}
+                    </Text>
+                  </TouchableOpacity>
+                  <Text style={styles.pageHint}>
+                    {imagePages.length} / {MAX_PHOTO_PAGES}
+                  </Text>
+                  {Platform.OS === "web" && (
+                    <Text style={styles.webPhotoHint}>{t("webPhotoHint")}</Text>
+                  )}
+                </View>
+              )}
+              <TouchableOpacity
+                style={[
+                  styles.primaryButton,
+                  submitting && styles.primaryButtonDisabled,
+                  ((selectedOption === "upload" && !fileMeta) ||
+                    (selectedOption === "photo" && !imagePages.length)) &&
+                    styles.primaryButtonDisabled
+                ]}
+                disabled={
+                  submitting ||
+                  (selectedOption === "upload" && !fileMeta) ||
+                  (selectedOption === "photo" && !imagePages.length)
+                }
+                onPress={onProcess}
+              >
+                <Text style={styles.primaryButtonText}>
+                  {submitting ? t("loading") : t("processDocument")}
                 </Text>
-                {Platform.OS === "web" && (
-                  <Text style={styles.webPhotoHint}>{t("webPhotoHint")}</Text>
-                )}
-              </View>
-            )}
-            <TouchableOpacity
-              style={[
-                styles.primaryButton,
-                submitting && styles.primaryButtonDisabled,
-                ((selectedOption === "upload" && !fileMeta) ||
-                  (selectedOption === "photo" && !imagePages.length)) &&
-                  styles.primaryButtonDisabled
-              ]}
-              disabled={
-                submitting ||
-                (selectedOption === "upload" && !fileMeta) ||
-                (selectedOption === "photo" && !imagePages.length)
-              }
-              onPress={onProcess}
-            >
-              <Text style={styles.primaryButtonText}>
-                {submitting ? t("loading") : t("processDocument")}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </View>
+              </TouchableOpacity>
+            </View>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -520,10 +532,17 @@ const styles = StyleSheet.create({
   headerSpacer: {
     width: 36
   },
-  content: {
-    flex: 1,
+  keyboardAvoid: {
+    flex: 1
+  },
+  scroll: {
+    flex: 1
+  },
+  scrollContent: {
     paddingHorizontal: 24,
-    paddingTop: 20
+    paddingTop: 20,
+    paddingBottom: 40,
+    flexGrow: 1
   },
   instruction: {
     fontSize: 16,
