@@ -31,10 +31,11 @@ Or use npx (no installation needed):
 npx expo --version
 ```
 
-### 3. OpenAI API Key
+### 3. OpenAI API Key (backend only)
+
 - Sign up at https://platform.openai.com/
 - Create an API key from https://platform.openai.com/api-keys
-- You'll need this for the backend `.env` file
+- **Never** put this key in the mobile app or in any `EXPO_PUBLIC_*` variable (those values ship in the client bundle). Use `backend/.env` locally and your host’s secret store in production (e.g. Railway variables).
 
 ## Project Structure
 
@@ -64,13 +65,7 @@ easyread/
    ```
 
 3. **Create `.env` file:**
-   Create a file named `.env` in the `easyread/backend/` directory with the following content:
-   ```
-   OPENAI_API_KEY=sk-your-actual-openai-api-key-here
-   PORT=4000
-   ```
-   
-   Replace `sk-your-actual-openai-api-key-here` with your actual OpenAI API key.
+   Copy `backend/.env.example` to `backend/.env` and set `OPENAI_API_KEY` and optional vars. Do not commit `.env`.
 
 4. **Initialize the database:**
    The database will be created automatically when you start the server.
@@ -92,13 +87,15 @@ easyread/
    npm install -g expo-cli
    ```
 
-4. **Configure backend URL:**
-   Open `easyread/mobile/src/constants.js` and set the `BACKEND_URL`:
-   - For **web testing**: `http://localhost:4000`
-   - For **Android emulator**: `http://10.0.2.2:4000`
-   - For **physical device**: Use your Mac's local IP address (e.g., `http://192.168.1.100:4000`)
+4. **Configure backend URL (mobile):**
+   Copy `mobile/.env.example` to `mobile/.env` and adjust:
+   - **Test against hosted API (default):** set `EXPO_PUBLIC_BACKEND_URL` to your HTTPS API (same host as `defaultPublicBackend.json` / `eas.json`).
+   - **Simulator/emulator + local `npm start` backend:** set `EXPO_PUBLIC_USE_LOCAL_BACKEND=true` (and leave `EXPO_PUBLIC_BACKEND_URL` unset) so Android emulator uses `10.0.2.2:4000` and iOS simulator uses `127.0.0.1:4000`.
+   - **Physical device + local backend:** set `EXPO_PUBLIC_BACKEND_URL=http://YOUR_LAN_IP:4000` (phone must reach that IP).
    
-   To find your Mac's IP address:
+   Resolution order and release safety are implemented in `mobile/src/backendResolution.js` (local/LAN URLs are ignored in release builds).
+   
+   To find your Mac's LAN IP:
    ```bash
    ipconfig getifaddr en0
    ```
@@ -150,7 +147,7 @@ This will open the Expo development tools. You can then:
    - iOS: App Store
    - Android: Google Play Store
 2. Ensure phone and Mac are on the same Wi-Fi network
-3. Update `BACKEND_URL` in `constants.js` to your Mac's IP address
+3. Set `EXPO_PUBLIC_BACKEND_URL=http://YOUR_MAC_LAN_IP:4000` in `mobile/.env`
 4. Start backend server
 5. Start mobile app
 6. Scan QR code with Expo Go app
@@ -198,7 +195,7 @@ kill -9 $(lsof -ti:4000)
 
 **Cannot connect to backend:**
 - Verify backend is running on port 4000
-- Check `BACKEND_URL` in `constants.js` matches your setup
+- Check `EXPO_PUBLIC_BACKEND_URL` / `EXPO_PUBLIC_USE_LOCAL_BACKEND` in `mobile/.env` (see `backendResolution.js`)
 - For physical device, ensure Mac and phone are on same network
 
 **Missing dependencies:**

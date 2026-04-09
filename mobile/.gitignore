@@ -1,0 +1,4 @@
+.expo/
+.env
+.env.local
+dist/

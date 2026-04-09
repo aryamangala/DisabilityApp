@@ -1,18 +1,19 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { useRoute, useNavigation } from "@react-navigation/native";
 
 import LoadingOverlay from "../components/LoadingOverlay";
 import ErrorBanner from "../components/ErrorBanner";
-import { createDocumentFromText, createDocumentFromFile } from "../api";
+import { createDocumentFromText, createDocumentFromFile, fetchChunk } from "../api";
 import { useDocument } from "../context/DocumentContext";
 import { useSettings } from "../context/SettingsContext";
 import { getTranslation } from "../utils/translations";
+import { devError, devLog, devWarn } from "../devLog";
 
 export default function ProcessingScreen() {
   const route = useRoute();
   const navigation = useNavigation();
-  const { setDocId, setChunkCount, setCurrentChunkIndex, clearAll } =
+  const { setDocId, setChunkCount, setCurrentChunkIndex, setChunkInCache, upsertLocalDocument, clearAll } =
     useDocument();
   const { language } = useSettings();
   const t = (key) => getTranslation(key, language);
@@ -30,7 +31,7 @@ export default function ProcessingScreen() {
     async function run() {
       // Prevent multiple simultaneous runs
       if (hasRun) {
-        console.log("Processing already in progress, skipping...");
+        devLog("Processing already in progress, skipping...");
         return;
       }
       hasRun = true;
@@ -39,6 +40,8 @@ export default function ProcessingScreen() {
         setError("Missing processing parameters.");
         return;
       }
+
+      let savedToDevice = false;
 
       try {
         await clearAll();
@@ -57,18 +60,30 @@ export default function ProcessingScreen() {
           });
         } else if (mode === "pdf" || mode === "image") {
           setStatus("Preparing file upload...");
-          console.log("Processing file upload:", { mode, payload: { ...payload, uri: payload.uri?.substring(0, 50) } });
-          
-          result = await createDocumentFromFile({
-            title: payload.title,
-            language: payload.language,
-            uri: payload.uri,
-            name: payload.name,
-            mimeType: payload.mimeType,
-            inputType: mode === "pdf" ? "pdf" : "image",
-            file: payload.file // Pass file object for web
+          devLog("Processing file upload:", {
+            mode,
+            pages: payload.imagePages?.length || 1,
           });
-          
+
+          if (mode === "image" && payload.imagePages?.length > 0) {
+            result = await createDocumentFromFile({
+              title: payload.title,
+              language: payload.language,
+              inputType: "image",
+              imagePages: payload.imagePages
+            });
+          } else {
+            result = await createDocumentFromFile({
+              title: payload.title,
+              language: payload.language,
+              uri: payload.uri,
+              name: payload.name,
+              mimeType: payload.mimeType,
+              inputType: mode === "pdf" ? "pdf" : "image",
+              file: payload.file
+            });
+          }
+
           setStatus("Processing document...");
         } else {
           throw new Error("Unknown mode.");
@@ -80,22 +95,78 @@ export default function ProcessingScreen() {
           throw new Error("Server returned incomplete response.");
         }
 
-        setStatus("Preparing reader...");
+        const MAX_LOCAL_CHUNKS = 280;
+        if (result.chunkCount > MAX_LOCAL_CHUNKS) {
+          throw new Error(
+            getTranslation("documentTooLargeDevice", language)
+          );
+        }
+
+        setStatus("Saving to device...");
         setDocId(result.docId);
         setChunkCount(result.chunkCount);
         setCurrentChunkIndex(0);
 
-        navigation.reset({
-          index: 1,
-          routes: [
-            { name: "Import" },
-            { name: "Reader" }
-          ]
-        });
+        const createdAt = new Date().toISOString();
+        const titleForLocal =
+          payload?.title ||
+          payload?.name ||
+          (mode === "image" ? "Photo document" : "Untitled");
+
+        // Fetch all chunks once so the backend can remain ephemeral.
+        const chunks = [];
+        for (let i = 0; i < result.chunkCount; i++) {
+          if (cancelled) return;
+          setStatus(`Saving to device... (${i + 1}/${result.chunkCount})`);
+          const data = await fetchChunk(result.docId, i);
+          chunks.push(data);
+          setChunkInCache(i, data);
+        }
+
+        try {
+          await upsertLocalDocument({
+            docId: result.docId,
+            title: titleForLocal,
+            createdAt,
+            chunkCount: result.chunkCount,
+            chunks,
+          });
+          savedToDevice = true;
+        } catch (saveErr) {
+          try {
+            await clearAll();
+          } catch {
+            // ignore
+          }
+          throw saveErr;
+        }
+
+        setStatus("Preparing reader...");
+        try {
+          navigation.reset({
+            index: 1,
+            routes: [
+              { name: "Import" },
+              { name: "Reader" }
+            ]
+          });
+        } catch (navErr) {
+          devWarn("ProcessingScreen navigation.reset failed:", navErr);
+          navigation.navigate("Reader");
+        }
       } catch (e) {
         if (cancelled) return;
-        console.error("ProcessingScreen error:", e);
-        setError(e.message || "Failed to process document. Check console for details.");
+        devError("ProcessingScreen error:", e);
+        if (!savedToDevice) {
+          try {
+            await clearAll();
+          } catch {
+            // ignore
+          }
+        }
+        setError(
+          e.message || "Failed to process document. Please try again."
+        );
       } finally {
         if (!cancelled) {
           setStatus("");
@@ -103,7 +174,12 @@ export default function ProcessingScreen() {
       }
     }
 
-    run();
+    run().catch((e) => {
+      devError("ProcessingScreen unhandled:", e);
+      if (!cancelled) {
+        setError(e?.message || "Something went wrong. Please try again.");
+      }
+    });
 
     return () => {
       cancelled = true;
@@ -116,9 +192,28 @@ export default function ProcessingScreen() {
       <Text style={styles.header}>{t("processing")}</Text>
       <ErrorBanner message={error} />
       <Text style={styles.body}>
-        {t("mayTakeMoment")}
+        {error ? t("processingErrorHint") : t("mayTakeMoment")}
       </Text>
-      <LoadingOverlay text={status || t("processing")} />
+      {!error ? (
+        <LoadingOverlay text={status || t("processing")} />
+      ) : (
+        <View style={styles.errorActions}>
+          <TouchableOpacity
+            style={styles.primaryButton}
+            onPress={() => navigation.navigate("Import")}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.primaryButtonText}>{t("tryAgain")}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={() => navigation.navigate("Landing")}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.secondaryButtonText}>{t("backToHome")}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 }
@@ -143,6 +238,35 @@ const styles = StyleSheet.create({
     color: "#4A4A4A",
     marginTop: 8,
     textAlign: "center"
+  },
+  errorActions: {
+    marginTop: 28,
+    width: "100%",
+    maxWidth: 320,
+    gap: 12
+  },
+  primaryButton: {
+    backgroundColor: "#B42318",
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: "center"
+  },
+  primaryButtonText: {
+    color: "white",
+    fontWeight: "700",
+    fontSize: 16
+  },
+  secondaryButton: {
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "#8F2D12"
+  },
+  secondaryButtonText: {
+    color: "#8F2D12",
+    fontWeight: "600",
+    fontSize: 16
   }
 });
 

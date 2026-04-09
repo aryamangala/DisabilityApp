@@ -2,11 +2,13 @@ import sqlite3 from "sqlite3";
 import path from "path";
 import { fileURLToPath } from "url";
 
-sqlite3.verbose();
+if (process.env.NODE_ENV !== "production") {
+  sqlite3.verbose();
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DB_PATH = path.join(__dirname, "easyread.db");
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, "easyread.db");
 
 export const db = new sqlite3.Database(DB_PATH);
 
@@ -50,7 +52,7 @@ export function initDb() {
     `, (err) => {
       // Ignore error if column already exists
       if (err && !err.message.includes("duplicate column")) {
-        console.warn("Migration warning:", err.message);
+        console.error("[EasyRead] DB migration:", err.message);
       }
     });
   });

@@ -1,27 +1,33 @@
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import {
   View,
   Text,
   StyleSheet,
   TextInput,
   TouchableOpacity,
-  Platform
+  Platform,
+  BackHandler
 } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
-import * as FileSystem from "expo-file-system";
-import { useNavigation } from "@react-navigation/native";
+import * as FileSystem from "expo-file-system/legacy";
+import { useNavigation, useFocusEffect } from "@react-navigation/native";
 
 import ErrorBanner from "../components/ErrorBanner";
 import { useSettings } from "../context/SettingsContext";
 import { getTranslation } from "../utils/translations";
+import { devError, devLog, devWarn } from "../devLog";
+
+const MAX_PHOTO_PAGES = 24;
+/** Rough cap to keep JSON body under backend limits and avoid device memory spikes */
+const MAX_MANUAL_TEXT_CHARS = 450000;
 
 export default function ImportScreen() {
   const [selectedOption, setSelectedOption] = useState(null); // "photo", "text", "upload"
   const [title, setTitle] = useState("");
   const [textInput, setTextInput] = useState("");
   const [fileMeta, setFileMeta] = useState(null);
-  const [imageMeta, setImageMeta] = useState(null);
+  const [imagePages, setImagePages] = useState([]);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -29,8 +35,48 @@ export default function ImportScreen() {
   const { language: userLanguage } = useSettings();
   const t = (key) => getTranslation(key, userLanguage);
 
+  // After Processing, the stack may be [Import, Reader]; popping Reader leaves Import as root,
+  // so goBack() would fail. Fall back to Landing when there is no history.
+  const onBack = () => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+    } else {
+      navigation.navigate("Landing");
+    }
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS !== "android") return undefined;
+      const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+        if (navigation.canGoBack()) return false;
+        navigation.navigate("Landing");
+        return true;
+      });
+      return () => sub.remove();
+    }, [navigation])
+  );
+
+  // For manual text imports, derive a readable title if the title field is blank.
+  const buildManualTextTitle = () => {
+    const trimmedTitle = title.trim();
+    if (trimmedTitle) return trimmedTitle;
+
+    const normalizedText = textInput.replace(/\s+/g, " ").trim();
+    if (!normalizedText) return "Untitled";
+
+    const firstSentence = normalizedText.split(/[.!?]/)[0].trim();
+    const baseTitle = firstSentence || normalizedText;
+    const maxTitleLength = 30;
+
+    return baseTitle.length > maxTitleLength
+      ? `${baseTitle.slice(0, maxTitleLength - 3).trim()}...`
+      : baseTitle;
+  };
+
   const onSelectPdf = async () => {
     setError("");
+    setImagePages([]);
     setFileMeta(null);
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -41,13 +87,13 @@ export default function ImportScreen() {
       if (result.canceled) return;
       const file = result.assets[0];
       
-      console.log("PDF selected:", {
+      devLog("PDF selected:", {
         name: file.name,
         uri: file.uri?.substring(0, 50),
         mimeType: file.mimeType,
         size: file.size,
         hasFileProperty: !!file.file,
-        platform: Platform.OS
+        platform: Platform.OS,
       });
       
       // On web, expo-document-picker may provide file.file or we use the URI
@@ -59,17 +105,63 @@ export default function ImportScreen() {
         mimeType: file.mimeType || "application/pdf"
       };
       
-      console.log("File metadata stored:", { ...fileMeta, uri: fileMeta.uri?.substring(0, 50) });
+      devLog("File metadata stored:", {
+        ...fileMeta,
+        uri: fileMeta.uri?.substring(0, 50),
+      });
       setFileMeta(fileMeta);
     } catch (e) {
-      console.error("PDF picker error:", e);
+      devError("PDF picker error:", e);
       setError(`Failed to pick PDF: ${e.message || "Unknown error"}`);
     }
   };
 
-  const onTakePhoto = async () => {
+  /**
+   * Web: use a file input so each page is a real File (upload works) and mobile browsers
+   * can offer camera + library in one flow. Native: expo-image-picker camera.
+   */
+  const capturePhotoPage = async () => {
+    if (imagePages.length >= MAX_PHOTO_PAGES) {
+      setError(t("maxPhotoPages"));
+      return;
+    }
     setError("");
-    setImageMeta(null);
+
+    if (Platform.OS === "web" && typeof document !== "undefined") {
+      try {
+        await new Promise((resolve) => {
+          const input = document.createElement("input");
+          input.type = "file";
+          input.accept = "image/jpeg,image/png,image/webp,image/heic";
+          input.onchange = () => {
+            const f = input.files?.[0];
+            if (!f) {
+              resolve();
+              return;
+            }
+            setImagePages((prev) => {
+              const nextIndex = prev.length + 1;
+              return [
+                ...prev,
+                {
+                  uri: URL.createObjectURL(f),
+                  name: `page_${nextIndex}.jpg`,
+                  mimeType: f.type || "image/jpeg",
+                  file: f
+                }
+              ];
+            });
+            resolve();
+          };
+          input.click();
+        });
+      } catch (e) {
+        devError("Web photo pick failed:", e);
+        setError(t("webPhotoFailed"));
+      }
+      return;
+    }
+
     try {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== "granted") {
@@ -82,14 +174,22 @@ export default function ImportScreen() {
       });
       if (result.canceled) return;
       const asset = result.assets[0];
-      setImageMeta({
-        uri: asset.uri,
-        name: "photo.jpg",
-        mimeType: "image/jpeg"
-      });
+      setImagePages((prev) => [
+        ...prev,
+        {
+          uri: asset.uri,
+          name: `page_${prev.length + 1}.jpg`,
+          mimeType: "image/jpeg",
+          file: null
+        }
+      ]);
     } catch (e) {
       setError("Failed to open camera. Please try again.");
     }
+  };
+
+  const removePhotoPage = (index) => {
+    setImagePages((prev) => prev.filter((_, i) => i !== index));
   };
 
   const onProcess = async () => {
@@ -104,10 +204,19 @@ export default function ImportScreen() {
           setSubmitting(false);
           return;
         }
+        if (textInput.length > MAX_MANUAL_TEXT_CHARS) {
+          setError(
+            t("error") +
+              ": " +
+              t("textPasteTooLong")
+          );
+          setSubmitting(false);
+          return;
+        }
         navigation.navigate("Processing", {
           mode: "text",
           payload: {
-            title: title || "Untitled",
+            title: buildManualTextTitle(),
             language: userLanguage || "es",
             text: textInput
           }
@@ -129,7 +238,7 @@ export default function ImportScreen() {
               return;
             }
           } catch (e) {
-            console.warn("FileSystem check failed:", e);
+            devWarn("FileSystem check failed:", e);
           }
         }
         
@@ -145,35 +254,38 @@ export default function ImportScreen() {
           }
         });
       } else if (selectedOption === "photo") {
-        if (!imageMeta) {
-          setError(t("error") + ": Please take a photo first.");
+        if (!imagePages.length) {
+          setError(t("error") + ": " + t("pleaseCaptureOnePage"));
           setSubmitting(false);
           return;
         }
-        
-        // On web, skip FileSystem check; on native, verify file exists
+
         if (Platform.OS !== "web") {
           try {
-            const info = await FileSystem.getInfoAsync(imageMeta.uri);
-            if (!info.exists) {
-              setError(t("error") + ": Captured image is not accessible.");
-              setSubmitting(false);
-              return;
+            for (const p of imagePages) {
+              const info = await FileSystem.getInfoAsync(p.uri);
+              if (!info.exists) {
+                setError(t("error") + ": Captured image is not accessible.");
+                setSubmitting(false);
+                return;
+              }
             }
           } catch (e) {
-            console.warn("FileSystem check failed:", e);
+            devWarn("FileSystem check failed:", e);
           }
         }
-        
+
         navigation.navigate("Processing", {
           mode: "image",
           payload: {
             title: title || "Photo document",
             language: userLanguage || "es",
-            uri: imageMeta.uri,
-            name: imageMeta.name,
-            mimeType: imageMeta.mimeType,
-            file: imageMeta.file // Include file object for web if available
+            imagePages: imagePages.map(({ uri, name, mimeType, file }) => ({
+              uri,
+              name,
+              mimeType,
+              file
+            }))
           }
         });
       } else {
@@ -182,7 +294,7 @@ export default function ImportScreen() {
         return;
       }
     } catch (e) {
-      console.error("ImportScreen error:", e);
+      devError("ImportScreen error:", e);
       setError(`Failed to start processing: ${e.message || "Unknown error"}`);
       setSubmitting(false);
       return;
@@ -194,7 +306,7 @@ export default function ImportScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
+        <TouchableOpacity onPress={onBack}>
           <Text style={styles.backArrow}>←</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{t("addDocument")}</Text>
@@ -213,7 +325,10 @@ export default function ImportScreen() {
             style={styles.optionCard}
             onPress={async () => {
               setSelectedOption("photo");
-              await onTakePhoto();
+              setFileMeta(null);
+              if (imagePages.length === 0) {
+                await capturePhotoPage();
+              }
             }}
           >
             <View style={[styles.iconContainer, styles.iconOrange]}>
@@ -221,13 +336,16 @@ export default function ImportScreen() {
             </View>
             <View style={styles.optionTextContainer}>
               <Text style={styles.optionTitle}>{t("takePhoto")}</Text>
-              <Text style={styles.optionSubtitle}>{t("scanWithCamera")}</Text>
+              <Text style={styles.optionSubtitle}>{t("scanMultiplePages")}</Text>
             </View>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.optionCard}
-            onPress={() => setSelectedOption("text")}
+            onPress={() => {
+              setImagePages([]);
+              setSelectedOption("text");
+            }}
           >
             <View style={[styles.iconContainer, styles.iconYellow]}>
               <Text style={[styles.iconText, styles.iconTextT]}>T</Text>
@@ -241,6 +359,7 @@ export default function ImportScreen() {
           <TouchableOpacity
             style={styles.optionCard}
             onPress={async () => {
+              setImagePages([]);
               setSelectedOption("upload");
               await onSelectPdf();
             }}
@@ -304,25 +423,61 @@ export default function ImportScreen() {
             </View>
             {selectedOption === "upload" && fileMeta && (
               <View style={styles.fileInfo}>
-                <Text style={styles.fileLabel}>{t("uploadDocument")}: {fileMeta.name}</Text>
+                <Text style={styles.fileLabel}>
+                  {t("uploadDocument")}: {fileMeta.name}
+                </Text>
               </View>
             )}
-            {selectedOption === "photo" && imageMeta && (
-              <View style={styles.fileInfo}>
-                <Text style={styles.fileLabel}>{t("takePhoto")} ✓</Text>
+            {selectedOption === "photo" && (
+              <View style={styles.photoSection}>
+                {imagePages.map((p, index) => (
+                  <View key={`${p.uri}-${index}`} style={styles.pageRow}>
+                    <Text style={styles.pageRowLabel}>
+                      {t("pageLabel")} {index + 1}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => removePhotoPage(index)}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Text style={styles.removePageText}>{t("removePage")}</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+                <TouchableOpacity
+                  style={[
+                    styles.secondaryButton,
+                    (imagePages.length >= MAX_PHOTO_PAGES || submitting) &&
+                      styles.secondaryButtonDisabled
+                  ]}
+                  disabled={imagePages.length >= MAX_PHOTO_PAGES || submitting}
+                  onPress={capturePhotoPage}
+                >
+                  <Text style={styles.secondaryButtonText}>
+                    {imagePages.length === 0
+                      ? t("capturePage")
+                      : t("addAnotherPage")}
+                  </Text>
+                </TouchableOpacity>
+                <Text style={styles.pageHint}>
+                  {imagePages.length} / {MAX_PHOTO_PAGES}
+                </Text>
+                {Platform.OS === "web" && (
+                  <Text style={styles.webPhotoHint}>{t("webPhotoHint")}</Text>
+                )}
               </View>
             )}
             <TouchableOpacity
               style={[
                 styles.primaryButton,
                 submitting && styles.primaryButtonDisabled,
-                ((selectedOption === "upload" && !fileMeta) || 
-                 (selectedOption === "photo" && !imageMeta)) && styles.primaryButtonDisabled
+                ((selectedOption === "upload" && !fileMeta) ||
+                  (selectedOption === "photo" && !imagePages.length)) &&
+                  styles.primaryButtonDisabled
               ]}
               disabled={
-                submitting || 
+                submitting ||
                 (selectedOption === "upload" && !fileMeta) ||
-                (selectedOption === "photo" && !imageMeta)
+                (selectedOption === "photo" && !imagePages.length)
               }
               onPress={onProcess}
             >
@@ -411,7 +566,7 @@ const styles = StyleSheet.create({
   },
   iconText: {
     fontSize: 28,
-    color: "white"
+    color: "#1F2937"
   },
   iconTextT: {
     fontSize: 32,
@@ -429,7 +584,7 @@ const styles = StyleSheet.create({
   },
   optionSubtitle: {
     fontSize: 14,
-    color: "#6B7280"
+    color: "#475467"
   },
   inputSection: {
     marginTop: 8
@@ -469,8 +624,63 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#D1D5DB"
   },
+  photoSection: {
+    marginBottom: 16
+  },
+  pageRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#E8DCC6",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 8
+  },
+  pageRowLabel: {
+    fontSize: 14,
+    color: "#2C2C2C",
+    fontWeight: "600"
+  },
+  removePageText: {
+    fontSize: 14,
+    color: "#B42318",
+    fontWeight: "600"
+  },
+  secondaryButton: {
+    backgroundColor: "#D4C4A8",
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    alignItems: "center",
+    marginTop: 4,
+    marginBottom: 8
+  },
+  secondaryButtonDisabled: {
+    opacity: 0.45
+  },
+  secondaryButtonText: {
+    color: "#2C2C2C",
+    fontWeight: "700",
+    fontSize: 15
+  },
+  pageHint: {
+    fontSize: 12,
+    color: "#6B7280",
+    textAlign: "center",
+    marginBottom: 4
+  },
+  webPhotoHint: {
+    fontSize: 12,
+    color: "#5B6473",
+    textAlign: "center",
+    marginTop: 8,
+    lineHeight: 18
+  },
   primaryButton: {
-    backgroundColor: "#FF6B4A",
+    backgroundColor: "#B42318",
     borderRadius: 12,
     paddingVertical: 18,
     paddingHorizontal: 20,

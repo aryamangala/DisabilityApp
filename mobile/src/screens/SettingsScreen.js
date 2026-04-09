@@ -12,7 +12,7 @@ import { getTranslation } from "../utils/translations";
 
 export default function SettingsScreen() {
   const navigation = useNavigation();
-  const { textSize, setTextSize, language, setLanguage, getTextSizeStyle } = useSettings();
+  const { textSize, setTextSize, language, setLanguage, theme, setTheme, getTextSizeStyle } = useSettings();
   const t = (key) => getTranslation(key, language);
 
   const textSizes = [
@@ -33,6 +33,49 @@ export default function SettingsScreen() {
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>{t("appearance")}</Text>
+          <Text style={styles.sectionDescription}>{t("chooseTheme")}</Text>
+
+          <View style={styles.optionsContainer}>
+            <TouchableOpacity
+              style={[
+                styles.optionButton,
+                theme === "light" && styles.optionButtonActive
+              ]}
+              onPress={() => setTheme("light")}
+            >
+              <Text
+                style={[
+                  styles.optionText,
+                  theme === "light" && styles.optionTextActive
+                ]}
+              >
+                {t("lightMode")}
+              </Text>
+              {theme === "light" && <Text style={styles.checkmark}>✓</Text>}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.optionButton,
+                theme === "dark" && styles.optionButtonActive
+              ]}
+              onPress={() => setTheme("dark")}
+            >
+              <Text
+                style={[
+                  styles.optionText,
+                  theme === "dark" && styles.optionTextActive
+                ]}
+              >
+                {t("darkMode")}
+              </Text>
+              {theme === "dark" && <Text style={styles.checkmark}>✓</Text>}
+            </TouchableOpacity>
+          </View>
+        </View>
+
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t("textSize")}</Text>
           <Text style={styles.sectionDescription}>
@@ -196,8 +239,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#F5F1E8"
   },
   optionButtonActive: {
-    borderColor: "#FF6B4A",
-    backgroundColor: "#FFE5DD"
+    borderColor: "#8F2D12",
+    backgroundColor: "#FBE4DD"
   },
   optionText: {
     fontSize: 14,
@@ -205,11 +248,11 @@ const styles = StyleSheet.create({
     color: "#2C2C2C"
   },
   optionTextActive: {
-    color: "#FF6B4A"
+    color: "#8F2D12"
   },
   checkmark: {
     fontSize: 18,
-    color: "#FF6B4A",
+    color: "#8F2D12",
     fontWeight: "700"
   },
   previewContainer: {
@@ -223,7 +266,7 @@ const styles = StyleSheet.create({
   previewLabel: {
     fontSize: 12,
     fontWeight: "600",
-    color: "#6B7280",
+    color: "#5B6473",
     marginBottom: 8
   },
   previewText: {

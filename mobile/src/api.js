@@ -1,5 +1,32 @@
-import { BACKEND_URL } from "./constants";
 import { Platform } from "react-native";
+
+import { BACKEND_URL } from "./constants";
+import { getBackendUnreachableMessage } from "./backendErrors";
+import { devError, devLog, devWarn } from "./devLog";
+
+const TEXT_REQUEST_TIMEOUT_MS = 180_000;
+const CHUNK_REQUEST_TIMEOUT_MS = 90_000;
+const HEALTH_TIMEOUT_MS = 12_000;
+
+function assertBackendConfigured() {
+  if (
+    !BACKEND_URL ||
+    typeof BACKEND_URL !== "string" ||
+    !/^https?:\/\//i.test(BACKEND_URL.trim())
+  ) {
+    throw new Error(
+      __DEV__
+        ? "API URL is not configured. Set EXPO_PUBLIC_BACKEND_URL or defaultPublicBackend.json."
+        : "The app could not reach its service. Please try again later."
+    );
+  }
+}
+
+function rethrowApiNetworkError(err) {
+  const msg = getBackendUnreachableMessage(err, BACKEND_URL);
+  if (msg) throw new Error(msg);
+  throw err;
+}
 
 async function handleResponse(resp) {
   let data = null;
@@ -11,7 +38,7 @@ async function handleResponse(resp) {
       data = JSON.parse(rawText);
     }
   } catch (e) {
-    console.warn("Failed to parse JSON response:", e);
+    devWarn("Failed to parse JSON response:", e);
     // If it's not JSON, use the raw text as the error message
     if (rawText && rawText.trim()) {
       data = { error: rawText.trim() };
@@ -37,23 +64,60 @@ async function handleResponse(resp) {
   return data;
 }
 
+function isRetryableChunkError(err) {
+  if (err?.name === "AbortError") return true;
+  return Boolean(getBackendUnreachableMessage(err, BACKEND_URL));
+}
+
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+async function webUriToFile(uri, fallbackName, mimeType) {
+  const response = await fetch(uri);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch file: ${response.status}`);
+  }
+  const contentLength = response.headers.get("content-length");
+  if (contentLength && parseInt(contentLength, 10) > MAX_UPLOAD_BYTES) {
+    throw new Error(
+      `File is too large (${Math.round(parseInt(contentLength, 10) / 1024 / 1024)}MB). Maximum size is 10MB.`
+    );
+  }
+  const blob = await response.blob();
+  if (blob.size > MAX_UPLOAD_BYTES) {
+    throw new Error(
+      `File is too large (${Math.round(blob.size / 1024 / 1024)}MB). Maximum size is 10MB.`
+    );
+  }
+  return new File([blob], fallbackName || "upload", {
+    type: mimeType || "application/octet-stream"
+  });
+}
+
 export async function createDocumentFromText({ title, language, text }) {
+  assertBackendConfigured();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), TEXT_REQUEST_TIMEOUT_MS);
   try {
-    console.log("Calling backend:", `${BACKEND_URL}/documents`);
+    devLog("Calling backend:", `${BACKEND_URL}/documents`);
     const resp = await fetch(`${BACKEND_URL}/documents`, {
       method: "POST",
+      signal: controller.signal,
       headers: {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({ title, language, text })
     });
-    return handleResponse(resp);
+    return await handleResponse(resp);
   } catch (e) {
-    console.error("createDocumentFromText error:", e);
-    if (e.message.includes("Failed to fetch") || e.message.includes("NetworkError")) {
-      throw new Error(`Cannot connect to backend at ${BACKEND_URL}. Is the server running?`);
+    devError("createDocumentFromText error:", e);
+    if (e.name === "AbortError") {
+      throw new Error(
+        "Processing this text is taking too long. Try a shorter passage or check your connection."
+      );
     }
-    throw e;
+    rethrowApiNetworkError(e);
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -64,7 +128,8 @@ export async function createDocumentFromFile({
   name,
   inputType,
   mimeType,
-  file // For web: actual File object
+  file,
+  imagePages
 }) {
   const formData = new FormData();
 
@@ -72,81 +137,90 @@ export async function createDocumentFromFile({
   if (language) formData.append("language", language);
   formData.append("inputType", inputType);
 
-  // On web, we need a File/Blob object for FormData
-  // On native, use the {uri, name, type} format
+  const useMultiImage =
+    inputType === "image" &&
+    Array.isArray(imagePages) &&
+    imagePages.length > 0;
+
+  assertBackendConfigured();
+
   if (Platform.OS === "web") {
-    let fileToUpload = file;
-    
-    console.log("Web file upload - checking file object:", { 
-      hasFile: !!file, 
-      hasUri: !!uri, 
-      uriType: uri?.substring(0, 20),
-      name,
-      fileSize: file?.size
-    });
-    
-    // Check file size limit (10MB for web uploads)
-    const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-    if (fileToUpload && fileToUpload.size > MAX_FILE_SIZE) {
-      throw new Error(`File is too large (${Math.round(fileToUpload.size / 1024 / 1024)}MB). Maximum size is 10MB.`);
-    }
-    
-    // If no file object provided, try to fetch from URI and convert to Blob
-    if (!fileToUpload && uri) {
-      try {
-        console.log("Fetching file from URI:", uri.substring(0, 50));
-        
-        // For blob: URLs, fetch directly
-        if (uri.startsWith("blob:")) {
-          const response = await fetch(uri);
-          if (!response.ok) {
-            throw new Error(`Failed to fetch file: ${response.status}`);
+    if (useMultiImage) {
+      for (let i = 0; i < imagePages.length; i++) {
+        const p = imagePages[i];
+        let fileToUpload = p.file;
+        if (!fileToUpload && p.uri) {
+          if (p.uri.startsWith("blob:") || p.uri.startsWith("data:")) {
+            fileToUpload = await webUriToFile(
+              p.uri,
+              p.name || `page_${i + 1}.jpg`,
+              p.mimeType || "image/jpeg"
+            );
+          } else {
+            throw new Error(
+              "Unsupported image URI. Please capture pages again."
+            );
           }
-          
-          // Check content length if available
-          const contentLength = response.headers.get("content-length");
-          if (contentLength && parseInt(contentLength) > MAX_FILE_SIZE) {
-            throw new Error(`File is too large (${Math.round(parseInt(contentLength) / 1024 / 1024)}MB). Maximum size is 10MB.`);
-          }
-          
-          const blob = await response.blob();
-          
-          // Check blob size
-          if (blob.size > MAX_FILE_SIZE) {
-            throw new Error(`File is too large (${Math.round(blob.size / 1024 / 1024)}MB). Maximum size is 10MB.`);
-          }
-          
-          fileToUpload = new File([blob], name || "upload", { type: mimeType || "application/octet-stream" });
-          console.log("Converted blob to File:", fileToUpload.size, "bytes");
-        } else if (uri.startsWith("data:")) {
-          // For data URLs, convert directly
-          const response = await fetch(uri);
-          const blob = await response.blob();
-          if (blob.size > MAX_FILE_SIZE) {
-            throw new Error(`File is too large (${Math.round(blob.size / 1024 / 1024)}MB). Maximum size is 10MB.`);
-          }
-          fileToUpload = new File([blob], name || "upload", { type: mimeType || "application/octet-stream" });
-        } else {
-          throw new Error("Unsupported file URI format. Please try selecting the file again.");
         }
-      } catch (e) {
-        console.error("Failed to convert URI to File:", e);
-        if (e.message.includes("too large")) {
-          throw e; // Re-throw size errors as-is
+        if (fileToUpload && fileToUpload.size > MAX_UPLOAD_BYTES) {
+          throw new Error(`Page ${i + 1} is too large (max 10MB per page).`);
         }
-        throw new Error(`Failed to read file: ${e.message}. Please try selecting the file again.`);
+        if (!fileToUpload) {
+          throw new Error(`Page ${i + 1} could not be read.`);
+        }
+        formData.append(
+          "files",
+          fileToUpload,
+          p.name || `page_${i + 1}.jpg`
+        );
       }
-    }
-    
-    if (fileToUpload) {
-      console.log("Appending file to FormData:", fileToUpload.name, fileToUpload.size, "bytes");
-      formData.append("file", fileToUpload, name || "upload");
     } else {
-      throw new Error("No file available to upload. Please select the file again.");
+      let fileToUpload = file;
+
+      if (fileToUpload && fileToUpload.size > MAX_UPLOAD_BYTES) {
+        throw new Error(
+          `File is too large (${Math.round(fileToUpload.size / 1024 / 1024)}MB). Maximum size is 10MB.`
+        );
+      }
+
+      if (!fileToUpload && uri) {
+        try {
+          if (uri.startsWith("blob:") || uri.startsWith("data:")) {
+            fileToUpload = await webUriToFile(
+              uri,
+              name || "upload",
+              mimeType || "application/octet-stream"
+            );
+          } else {
+            throw new Error(
+              "Unsupported file URI format. Please try selecting the file again."
+            );
+          }
+        } catch (e) {
+          if (e.message.includes("too large")) throw e;
+          throw new Error(
+            `Failed to read file: ${e.message}. Please try selecting the file again.`
+          );
+        }
+      }
+
+      if (!fileToUpload) {
+        throw new Error(
+          "No file available to upload. Please select the file again."
+        );
+      }
+
+      formData.append("file", fileToUpload, name || "upload");
     }
+  } else if (useMultiImage) {
+    imagePages.forEach((p, i) => {
+      formData.append("files", {
+        uri: p.uri,
+        name: p.name || `page_${i + 1}.jpg`,
+        type: p.mimeType || "image/jpeg"
+      });
+    });
   } else {
-    // Native: use React Native format
-    console.log("Native file upload:", { uri, name });
     formData.append("file", {
       uri,
       name: name || "upload",
@@ -154,72 +228,90 @@ export async function createDocumentFromFile({
     });
   }
 
+  const pageCount = useMultiImage ? imagePages.length : 1;
+  // Server runs OCR (OpenAI) per page before HTTP responds — must cover upload + all pages.
+  const uploadTimeoutMs =
+    inputType === "image"
+      ? Math.min(1_800_000, 120_000 + pageCount * 240_000) // up to 30 min; ~4 min/page
+      : 180_000; // PDF parse is local on server; 3 min is enough for upload + parse
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), uploadTimeoutMs);
+
   try {
-    console.log("Sending request to:", `${BACKEND_URL}/documents`);
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
-    
+    devLog("[ClaroDoc] POST /documents →", BACKEND_URL, {
+      inputType,
+      pages: pageCount,
+      timeoutMs: uploadTimeoutMs,
+    });
     const resp = await fetch(`${BACKEND_URL}/documents`, {
       method: "POST",
       signal: controller.signal,
-      // Don't set Content-Type header on web - let browser set it with boundary
-      headers: Platform.OS === "web" ? {} : {
-        "Content-Type": "multipart/form-data"
-      },
+      headers: {},
       body: formData
     });
-    
-    clearTimeout(timeoutId);
-    console.log("Response status:", resp.status);
-    
+
+    devLog("Response status:", resp.status);
+
     return handleResponse(resp);
   } catch (e) {
-    console.error("createDocumentFromFile error:", e);
+    devError("createDocumentFromFile error:", e);
     if (e.name === "AbortError") {
-      throw new Error("Upload timed out. The file may be too large or the server is not responding.");
+      throw new Error(
+        "This is taking too long (reading photos on the server can be slow). Try fewer or clearer pages, use Wi‑Fi, or try again in a moment."
+      );
     }
-    if (e.message.includes("Failed to fetch") || e.message.includes("NetworkError")) {
-      throw new Error(`Cannot connect to backend at ${BACKEND_URL}. Is the server running?`);
-    }
-    throw e;
+    rethrowApiNetworkError(e);
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
-export async function fetchChunk(docId, index) {
-  const resp = await fetch(
-    `${BACKEND_URL}/documents/${encodeURIComponent(docId)}/chunks/${index}`
-  );
-  return handleResponse(resp);
-}
-
-// Quiz functionality removed
-
-export async function fetchAllDocuments() {
-  const resp = await fetch(`${BACKEND_URL}/documents`);
-  return handleResponse(resp);
-}
-
-export async function fetchDocumentDetails(docId) {
-  const resp = await fetch(`${BACKEND_URL}/documents/${encodeURIComponent(docId)}`);
-  return handleResponse(resp);
-}
-
-export async function deleteAllDocuments() {
-  const resp = await fetch(`${BACKEND_URL}/documents`, {
-    method: "DELETE"
-  });
-  return handleResponse(resp);
-}
-
-export async function deleteDocument(docId) {
-  const resp = await fetch(`${BACKEND_URL}/documents/${encodeURIComponent(docId)}`, {
-    method: "DELETE"
-  });
-  return handleResponse(resp);
+export async function fetchChunk(docId, index, attempt = 0) {
+  assertBackendConfigured();
+  const url = `${BACKEND_URL}/documents/${encodeURIComponent(docId)}/chunks/${index}`;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), CHUNK_REQUEST_TIMEOUT_MS);
+  try {
+    const resp = await fetch(url, { signal: controller.signal });
+    return await handleResponse(resp);
+  } catch (e) {
+    if (e?.status === 404) {
+      throw new Error(
+        "That section is no longer on the server. If you saved this document on the device, open it from Previous Files."
+      );
+    }
+    if (attempt < 1 && isRetryableChunkError(e)) {
+      await new Promise((r) => setTimeout(r, 900));
+      return fetchChunk(docId, index, attempt + 1);
+    }
+    if (e.name === "AbortError") {
+      throw new Error(
+        "Loading this section took too long. Check your connection and try again."
+      );
+    }
+    rethrowApiNetworkError(e);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export async function checkHealth() {
-  const resp = await fetch(`${BACKEND_URL}/health`);
-  return handleResponse(resp);
+  assertBackendConfigured();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
+  try {
+    const resp = await fetch(`${BACKEND_URL}/health`, { signal: controller.signal });
+    return await handleResponse(resp);
+  } catch (e) {
+    if (e.name === "AbortError") {
+      throw new Error(
+        "The service did not respond in time. You may be offline or the server is busy."
+      );
+    }
+    rethrowApiNetworkError(e);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
