@@ -104,7 +104,7 @@ export default function PreviousFilesScreen() {
 
       await clearAll();
       setDocId(doc.docId);
-      setChunkCount(doc.chunkCount);
+      setChunkCount(n);
       setCurrentChunkIndex(0);
 
       if (Array.isArray(doc.chunks)) {

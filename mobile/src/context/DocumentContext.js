@@ -1,4 +1,11 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState
+} from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const DocumentContext = createContext(null);
@@ -30,6 +37,22 @@ export function DocumentProvider({ children }) {
         setRestoring(false);
       }
     })();
+  }, []);
+
+  const refreshDocIndex = useCallback(async () => {
+    try {
+      const raw = await AsyncStorage.getItem(DOC_INDEX_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          setDocIndex(parsed);
+          return;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    setDocIndex([]);
   }, []);
 
   const upsertLocalDocument = async ({ docId, title, createdAt, chunkCount, chunks }) => {
@@ -155,21 +178,7 @@ export function DocumentProvider({ children }) {
       }));
     },
     docIndex,
-    refreshDocIndex: async () => {
-      try {
-        const raw = await AsyncStorage.getItem(DOC_INDEX_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) {
-            setDocIndex(parsed);
-            return;
-          }
-        }
-      } catch {
-        // ignore
-      }
-      setDocIndex([]);
-    },
+    refreshDocIndex,
     upsertLocalDocument,
     getLocalDocument,
     deleteLocalDocument,
@@ -182,7 +191,7 @@ export function DocumentProvider({ children }) {
     },
     restoring
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [docId, chunkCount, currentChunkIndex, chunksCache, docIndex, restoring]);
+  }), [docId, chunkCount, currentChunkIndex, chunksCache, docIndex, restoring, refreshDocIndex]);
 
   return (
     <DocumentContext.Provider value={value}>
