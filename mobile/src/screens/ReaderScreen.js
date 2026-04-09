@@ -7,7 +7,8 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Modal,
-  Pressable
+  Pressable,
+  Alert
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Speech from "expo-speech";
@@ -19,6 +20,7 @@ import { fetchChunk } from "../api";
 import ErrorBanner from "../components/ErrorBanner";
 import ChunkProgress from "../components/ChunkProgress";
 import { getTranslation } from "../utils/translations";
+import { devWarn } from "../devLog";
 
 function isWordChar(char) {
   return /[A-Za-z0-9\u00C0-\u017F_]/.test(char);
@@ -116,7 +118,8 @@ export default function ReaderScreen() {
     currentChunkIndex,
     chunksCache,
     setChunkInCache,
-    setCurrentChunkIndex
+    setCurrentChunkIndex,
+    getLocalDocument
   } = useDocument();
   const { getTextSizeStyle, language, theme } = useSettings();
   const navigation = useNavigation();
@@ -125,6 +128,7 @@ export default function ReaderScreen() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [reloadToken, setReloadToken] = useState(0);
   const [isOriginalExpanded, setIsOriginalExpanded] = useState(false);
   const [selectedKeyTerm, setSelectedKeyTerm] = useState(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -167,18 +171,25 @@ export default function ReaderScreen() {
 
     Speech.stop();
     setIsSpeaking(true);
-    Speech.speak(text, {
-      language: easyReadSpeechLanguage,
-      rate: 0.72,
-      pitch: 1,
-      onDone: () => setIsSpeaking(false),
-      onStopped: () => setIsSpeaking(false),
-      onError: (e) => {
-        if (__DEV__) console.warn("expo-speech error:", e);
-        setIsSpeaking(false);
-      }
-    });
-  }, [easyReadSpeechText, easyReadSpeechLanguage, isSpeaking, stopSpeaking]);
+    try {
+      Speech.speak(text, {
+        language: easyReadSpeechLanguage,
+        rate: 0.72,
+        pitch: 1,
+        onDone: () => setIsSpeaking(false),
+        onStopped: () => setIsSpeaking(false),
+        onError: (e) => {
+          devWarn("expo-speech error:", e);
+          setIsSpeaking(false);
+          Alert.alert(getTranslation("error", language), getTranslation("speechUnavailable", language));
+        }
+      });
+    } catch (e) {
+      devWarn("Speech.speak threw:", e);
+      setIsSpeaking(false);
+      Alert.alert(getTranslation("error", language), getTranslation("speechUnavailable", language));
+    }
+  }, [easyReadSpeechText, easyReadSpeechLanguage, isSpeaking, stopSpeaking, language]);
 
   useEffect(() => {
     let cancelled = false;
@@ -188,18 +199,18 @@ export default function ReaderScreen() {
       // If chunk is already cached, don't reload
       if (chunksCache[currentChunkIndex]) return;
       
-      // Always try to load/refresh the chunk when currentChunkIndex changes
-      // This ensures we have the latest data, especially when navigating to a new chunk
-      
       setError("");
       setLoading(true);
       try {
-        const data = await fetchChunk(docId, currentChunkIndex);
+        // Prefer local storage: only this device's uploads should be visible.
+        const local = await getLocalDocument(docId);
+        const localChunk = local?.chunks?.[currentChunkIndex];
+        const data = localChunk || (await fetchChunk(docId, currentChunkIndex));
         if (cancelled) return;
         setChunkInCache(currentChunkIndex, data);
       } catch (e) {
         if (cancelled) return;
-        setError(e.message || "Failed to load chunk.");
+        setError(e.message || getTranslation("failedToLoad", language));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -210,7 +221,7 @@ export default function ReaderScreen() {
     return () => {
       cancelled = true;
     };
-  }, [docId, chunkCount, currentChunkIndex, setChunkInCache, chunksCache]);
+  }, [docId, chunkCount, currentChunkIndex, setChunkInCache, chunksCache, getLocalDocument, reloadToken, language]);
 
   // Reset expanded state and stop TTS when chunk changes
   useEffect(() => {
@@ -287,11 +298,15 @@ export default function ReaderScreen() {
       setCurrentChunkIndex(currentChunkIndex + 1);
       // Navigation will happen automatically via useEffect when currentChunkIndex changes
     } else {
-      // All chunks completed - navigate to Done screen
-      navigation.reset({
-        index: 0,
-        routes: [{ name: "Done" }]
-      });
+      try {
+        navigation.reset({
+          index: 0,
+          routes: [{ name: "Done" }]
+        });
+      } catch (e) {
+        devWarn("Reader navigate to Done:", e);
+        navigation.navigate("Done");
+      }
     }
   };
 
@@ -309,11 +324,37 @@ export default function ReaderScreen() {
 
   if (!docId || chunkCount == null) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.header}>{t("noDocumentLoaded")}</Text>
-        <Text style={styles.body}>
+      <View style={[styles.container, !isDark && styles.containerLight]}>
+        <Text style={[styles.header, !isDark && styles.headerOnLight]}>
+          {t("noDocumentLoaded")}
+        </Text>
+        <Text style={[styles.body, !isDark && styles.bodyOnLight]}>
           {t("goBackAndImport")}
         </Text>
+        <TouchableOpacity
+          style={styles.navPrimaryButton}
+          onPress={() => navigation.navigate("Landing")}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.navPrimaryButtonText}>{t("backToHome")}</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (chunkCount === 0) {
+    return (
+      <View style={[styles.container, !isDark && styles.containerLight]}>
+        <Text style={[styles.header, !isDark && styles.headerOnLight]}>
+          {t("documentHasNoPages")}
+        </Text>
+        <TouchableOpacity
+          style={styles.navPrimaryButton}
+          onPress={() => navigation.navigate("Landing")}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.navPrimaryButtonText}>{t("backToHome")}</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -352,7 +393,32 @@ export default function ReaderScreen() {
       {loading && !cached && (
         <View style={styles.center}>
           <ActivityIndicator size="large" color="#8F2D12" />
-          <Text style={styles.loadingText}>{t("loadingChunk")}</Text>
+          <Text style={[styles.loadingText, !isDark && styles.loadingTextLight]}>
+            {t("loadingChunk")}
+          </Text>
+        </View>
+      )}
+
+      {error && !cached && !loading && (
+        <View style={styles.center}>
+          <TouchableOpacity
+            style={[styles.actionButton, !isDark && styles.actionButtonLight]}
+            onPress={() => {
+              setError("");
+              setReloadToken((n) => n + 1);
+            }}
+            activeOpacity={0.85}
+          >
+            <Text style={[styles.actionButtonText, !isDark && styles.actionButtonTextLight]}>
+              {t("tryAgain")}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={{ marginTop: 12 }}
+            onPress={() => navigation.navigate("Landing")}
+          >
+            <Text style={[styles.body, !isDark && styles.bodyOnLight]}>{t("backToHome")}</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -597,9 +663,30 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     color: "#F8FAFC"
   },
+  headerOnLight: {
+    color: "#2C2C2C",
+    textAlign: "center"
+  },
   body: {
     fontSize: 14,
     color: "#E2E8F0"
+  },
+  bodyOnLight: {
+    color: "#4A4A4A",
+    textAlign: "center"
+  },
+  navPrimaryButton: {
+    marginTop: 24,
+    backgroundColor: "#B42318",
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 28,
+    alignSelf: "center"
+  },
+  navPrimaryButtonText: {
+    color: "white",
+    fontWeight: "700",
+    fontSize: 16
   },
   scroll: {
     flex: 1
@@ -957,6 +1044,9 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 8,
     color: "#E2E8F0"
+  },
+  loadingTextLight: {
+    color: "#475569"
   },
   loadingContainer: {
     flexDirection: "row",

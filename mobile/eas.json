@@ -7,23 +7,45 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
+      "channel": "development",
       "env": {
         "EXPO_PUBLIC_BACKEND_URL": "https://disabilityapp-production.up.railway.app"
+      },
+      "android": {
+        "buildType": "apk"
+      },
+      "ios": {
+        "simulator": false
       }
     },
     "preview": {
       "distribution": "internal",
+      "channel": "preview",
       "env": {
         "EXPO_PUBLIC_BACKEND_URL": "https://disabilityapp-production.up.railway.app"
-      }
+      },
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "autoIncrement": true
     },
     "production": {
+      "channel": "production",
       "env": {
         "EXPO_PUBLIC_BACKEND_URL": "https://disabilityapp-production.up.railway.app"
-      }
+      },
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "autoIncrement": true
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "android": {
+        "track": "internal",
+        "releaseStatus": "completed"
+      }
+    }
   }
 }

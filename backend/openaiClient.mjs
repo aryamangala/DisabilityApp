@@ -1,5 +1,16 @@
 import OpenAI from "openai";
 
+const logVerbose =
+  process.env.NODE_ENV !== "production" || process.env.LOG_VERBOSE === "true";
+
+function devLog(...args) {
+  if (logVerbose) console.log(...args);
+}
+
+function devWarn(...args) {
+  if (logVerbose) console.warn(...args);
+}
+
 // Lazy init: Railway must set OPENAI_API_KEY on the *service* (Variables). Constructing
 // OpenAI at import time crashes the process before the server can boot if the key is missing.
 let openaiSingleton;
@@ -19,7 +30,7 @@ function getOpenAI() {
 
 if (!process.env.OPENAI_API_KEY?.trim()) {
   console.warn(
-    "OPENAI_API_KEY is not set — AI routes will fail until you add it under this service's Variables on Railway."
+    "[EasyRead] OPENAI_API_KEY is not set; OpenAI-backed routes will fail until it is configured."
   );
 }
 
@@ -100,7 +111,7 @@ async function callJsonModelWithRetry(systemPrompt, userContent, schemaDescripti
       // Add a small delay between requests to avoid hitting rate limits
       if (attempt > 0) {
         const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000); // Exponential backoff, max 10s
-        console.log(`Retrying after ${delay}ms (attempt ${attempt + 1}/${maxRetries})...`);
+        devLog(`Retrying after ${delay}ms (attempt ${attempt + 1}/${maxRetries})...`);
         await sleep(delay);
       }
 
@@ -119,7 +130,7 @@ async function callJsonModelWithRetry(systemPrompt, userContent, schemaDescripti
       try {
         return JSON.parse(raw);
       } catch (e) {
-        console.warn("JSON parse failed, attempting repair:", e.message);
+        devWarn("JSON parse failed, attempting repair:", e.message);
         const repairMessages = [
           {
             role: "system",
@@ -153,7 +164,7 @@ async function callJsonModelWithRetry(systemPrompt, userContent, schemaDescripti
         const retryAfter = retryMatch ? parseInt(retryMatch[1]) : null;
         
         if (retryAfter) {
-          console.log(`Rate limit hit. Waiting ${retryAfter}ms before retry...`);
+          devLog(`Rate limit hit. Waiting ${retryAfter}ms before retry...`);
           await sleep(retryAfter + 100); // Add small buffer
         }
         continue; // Retry

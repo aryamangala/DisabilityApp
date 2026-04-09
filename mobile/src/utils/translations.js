@@ -1,7 +1,7 @@
 export const translations = {
   en: {
     // Landing Screen
-    appTitle: "Legal Guide",
+    appTitle: "ClaroDoc",
     tagline: "Know what you're signing.",
     newFile: "New File",
     previousFiles: "Previous Files",
@@ -40,8 +40,8 @@ export const translations = {
     previousChunk: "← Previous chunk",
     nextChunk: "Next Chunk →",
     finishReading: "Finish Reading",
-    generatingEasyRead: "Generating EasyRead format...",
-    willBeGenerated: "EasyRead format will be generated when you access the quiz.",
+    generatingEasyRead: "Preparing your simplified reading…",
+    willBeGenerated: "Simplified reading will appear here shortly.",
     tapUnderlinedWordHint: "Tap an underlined word to see its meaning.",
     difficultWordsTitle: "Difficult words",
     difficultWordLabel: "Difficult word",
@@ -111,11 +111,28 @@ export const translations = {
     loadingChunk: "Loading chunk...",
     loadingQuiz: "Loading quiz...",
     failedToLoad: "Failed to load chunk.",
-    failedToProcess: "Failed to process document. Please try again."
+    failedToProcess: "Failed to process document. Please try again.",
+    tryAgain: "Try again",
+    backToHome: "Back to home",
+    processingErrorHint:
+      "You can go back and try again, or return to the home screen.",
+    speechUnavailable:
+      "Read-out-loud is not available on this device right now. You can still read the text on screen.",
+    incompleteSavedFile:
+      "This saved file is incomplete. Delete it and process the document again.",
+    documentHasNoPages: "This document has no readable sections. Go back and import again.",
+    processingLabel: "Processing…",
+    documentTooLargeDevice:
+      "This document was split into too many parts to save on this device. Try shorter text, a smaller PDF, or fewer photos.",
+    textPasteTooLong:
+      "That text is too long to send at once. Try a shorter section or upload a PDF instead.",
+    webPhotoHint:
+      "In the browser, tap Add page and choose Take Photo or a saved image. The site must use HTTPS for the camera on most phones.",
+    webPhotoFailed: "Could not add that image. Try another file or use PDF upload."
   },
   es: {
     // Landing Screen
-    appTitle: "Guía Legal",
+    appTitle: "ClaroDoc",
     tagline: "Saber qué estás firmando.",
     newFile: "Nuevo Archivo",
     previousFiles: "Archivos Anteriores",
@@ -154,8 +171,8 @@ export const translations = {
     previousChunk: "← Fragmento anterior",
     nextChunk: "Siguiente Fragmento →",
     finishReading: "Terminar Lectura",
-    generatingEasyRead: "Generando formato Lectura Fácil...",
-    willBeGenerated: "El formato Lectura Fácil se generará cuando accedas a la prueba.",
+    generatingEasyRead: "Preparando tu lectura simplificada…",
+    willBeGenerated: "La lectura simplificada aparecerá aquí en breve.",
     tapUnderlinedWordHint: "Toca una palabra subrayada para ver su significado.",
     difficultWordsTitle: "Palabras dificiles",
     difficultWordLabel: "Palabra dificil",
@@ -225,7 +242,25 @@ export const translations = {
     loadingChunk: "Cargando fragmento...",
     loadingQuiz: "Cargando prueba...",
     failedToLoad: "Error al cargar el fragmento.",
-    failedToProcess: "Error al procesar el documento. Por favor intenta de nuevo."
+    failedToProcess: "Error al procesar el documento. Por favor intenta de nuevo.",
+    tryAgain: "Intentar de nuevo",
+    backToHome: "Volver al inicio",
+    processingErrorHint:
+      "Puedes volver e intentarlo de nuevo, o regresar a la pantalla principal.",
+    speechUnavailable:
+      "La lectura en voz alta no está disponible ahora en este dispositivo. Aún puedes leer el texto en pantalla.",
+    incompleteSavedFile:
+      "Este archivo guardado está incompleto. Elimínalo y vuelve a procesar el documento.",
+    documentHasNoPages:
+      "Este documento no tiene secciones legibles. Vuelve atrás e importa de nuevo.",
+    processingLabel: "Procesando…",
+    documentTooLargeDevice:
+      "Este documento tiene demasiadas partes para guardarlo en este dispositivo. Prueba con menos texto, un PDF más corto o menos fotos.",
+    textPasteTooLong:
+      "Ese texto es demasiado largo para enviarlo de una vez. Prueba con una parte más corta o sube un PDF.",
+    webPhotoHint:
+      "En el navegador, pulsa Añadir página y elige Tomar foto o una imagen guardada. En muchos móviles hace falta HTTPS para usar la cámara.",
+    webPhotoFailed: "No se pudo añadir esa imagen. Prueba con otro archivo o sube un PDF."
   }
 };
 

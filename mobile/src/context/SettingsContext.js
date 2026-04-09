@@ -1,7 +1,9 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const STORAGE_KEY = "@easyread_settings_v1";
+import { devWarn } from "../devLog";
+
+const STORAGE_KEY = "@clarodoc_settings_v1";
 
 const SettingsContext = createContext(null);
 
@@ -22,7 +24,7 @@ export function SettingsProvider({ children }) {
           setTheme(parsed.theme === "light" ? "light" : "dark");
         }
       } catch (e) {
-        console.warn("Failed to restore settings:", e.message);
+        devWarn("Failed to restore settings:", e.message);
       } finally {
         setLoading(false);
       }
@@ -36,7 +38,7 @@ export function SettingsProvider({ children }) {
       try {
         await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
       } catch (e) {
-        console.warn("Failed to persist settings:", e.message);
+        devWarn("Failed to persist settings:", e.message);
       }
     })();
   }, [textSize, language, theme, loading]);

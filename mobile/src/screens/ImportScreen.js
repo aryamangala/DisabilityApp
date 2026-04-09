@@ -16,8 +16,11 @@ import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import ErrorBanner from "../components/ErrorBanner";
 import { useSettings } from "../context/SettingsContext";
 import { getTranslation } from "../utils/translations";
+import { devError, devLog, devWarn } from "../devLog";
 
 const MAX_PHOTO_PAGES = 24;
+/** Rough cap to keep JSON body under backend limits and avoid device memory spikes */
+const MAX_MANUAL_TEXT_CHARS = 450000;
 
 export default function ImportScreen() {
   const [selectedOption, setSelectedOption] = useState(null); // "photo", "text", "upload"
@@ -84,13 +87,13 @@ export default function ImportScreen() {
       if (result.canceled) return;
       const file = result.assets[0];
       
-      console.log("PDF selected:", {
+      devLog("PDF selected:", {
         name: file.name,
         uri: file.uri?.substring(0, 50),
         mimeType: file.mimeType,
         size: file.size,
         hasFileProperty: !!file.file,
-        platform: Platform.OS
+        platform: Platform.OS,
       });
       
       // On web, expo-document-picker may provide file.file or we use the URI
@@ -102,20 +105,63 @@ export default function ImportScreen() {
         mimeType: file.mimeType || "application/pdf"
       };
       
-      console.log("File metadata stored:", { ...fileMeta, uri: fileMeta.uri?.substring(0, 50) });
+      devLog("File metadata stored:", {
+        ...fileMeta,
+        uri: fileMeta.uri?.substring(0, 50),
+      });
       setFileMeta(fileMeta);
     } catch (e) {
-      console.error("PDF picker error:", e);
+      devError("PDF picker error:", e);
       setError(`Failed to pick PDF: ${e.message || "Unknown error"}`);
     }
   };
 
+  /**
+   * Web: use a file input so each page is a real File (upload works) and mobile browsers
+   * can offer camera + library in one flow. Native: expo-image-picker camera.
+   */
   const capturePhotoPage = async () => {
     if (imagePages.length >= MAX_PHOTO_PAGES) {
       setError(t("maxPhotoPages"));
       return;
     }
     setError("");
+
+    if (Platform.OS === "web" && typeof document !== "undefined") {
+      try {
+        await new Promise((resolve) => {
+          const input = document.createElement("input");
+          input.type = "file";
+          input.accept = "image/jpeg,image/png,image/webp,image/heic";
+          input.onchange = () => {
+            const f = input.files?.[0];
+            if (!f) {
+              resolve();
+              return;
+            }
+            setImagePages((prev) => {
+              const nextIndex = prev.length + 1;
+              return [
+                ...prev,
+                {
+                  uri: URL.createObjectURL(f),
+                  name: `page_${nextIndex}.jpg`,
+                  mimeType: f.type || "image/jpeg",
+                  file: f
+                }
+              ];
+            });
+            resolve();
+          };
+          input.click();
+        });
+      } catch (e) {
+        devError("Web photo pick failed:", e);
+        setError(t("webPhotoFailed"));
+      }
+      return;
+    }
+
     try {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== "granted") {
@@ -158,6 +204,15 @@ export default function ImportScreen() {
           setSubmitting(false);
           return;
         }
+        if (textInput.length > MAX_MANUAL_TEXT_CHARS) {
+          setError(
+            t("error") +
+              ": " +
+              t("textPasteTooLong")
+          );
+          setSubmitting(false);
+          return;
+        }
         navigation.navigate("Processing", {
           mode: "text",
           payload: {
@@ -183,7 +238,7 @@ export default function ImportScreen() {
               return;
             }
           } catch (e) {
-            console.warn("FileSystem check failed:", e);
+            devWarn("FileSystem check failed:", e);
           }
         }
         
@@ -216,7 +271,7 @@ export default function ImportScreen() {
               }
             }
           } catch (e) {
-            console.warn("FileSystem check failed:", e);
+            devWarn("FileSystem check failed:", e);
           }
         }
 
@@ -239,7 +294,7 @@ export default function ImportScreen() {
         return;
       }
     } catch (e) {
-      console.error("ImportScreen error:", e);
+      devError("ImportScreen error:", e);
       setError(`Failed to start processing: ${e.message || "Unknown error"}`);
       setSubmitting(false);
       return;
@@ -406,6 +461,9 @@ export default function ImportScreen() {
                 <Text style={styles.pageHint}>
                   {imagePages.length} / {MAX_PHOTO_PAGES}
                 </Text>
+                {Platform.OS === "web" && (
+                  <Text style={styles.webPhotoHint}>{t("webPhotoHint")}</Text>
+                )}
               </View>
             )}
             <TouchableOpacity
@@ -613,6 +671,13 @@ const styles = StyleSheet.create({
     color: "#6B7280",
     textAlign: "center",
     marginBottom: 4
+  },
+  webPhotoHint: {
+    fontSize: 12,
+    color: "#5B6473",
+    textAlign: "center",
+    marginTop: 8,
+    lineHeight: 18
   },
   primaryButton: {
     backgroundColor: "#B42318",

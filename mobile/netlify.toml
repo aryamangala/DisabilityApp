@@ -1,0 +1,9 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# Set EXPO_PUBLIC_BACKEND_URL in Netlify UI → Site settings → Environment variables
+# (must be your public HTTPS API URL, not localhost)
