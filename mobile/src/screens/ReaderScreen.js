@@ -137,17 +137,13 @@ export default function ReaderScreen() {
 
   const easyReadSpeechText = useMemo(() => {
     const er = cached?.easyread;
-    if (!er) return "";
+    if (!er || !Array.isArray(er.sentences)) return "";
     const bits = [];
-    const title = typeof er.title === "string" ? er.title.trim() : "";
-    if (title) bits.push(title);
-    if (Array.isArray(er.sentences)) {
-      er.sentences.forEach((s) => {
-        const str = typeof s === "string" ? s : s != null ? String(s) : "";
-        const line = str.replace(/\s+/g, " ").trim();
-        if (line) bits.push(line);
-      });
-    }
+    er.sentences.forEach((s) => {
+      const str = typeof s === "string" ? s : s != null ? String(s) : "";
+      const line = str.replace(/\s+/g, " ").trim();
+      if (line) bits.push(line);
+    });
     return bits.join(". ");
   }, [cached?.easyread]);
 
@@ -428,31 +424,29 @@ export default function ReaderScreen() {
           contentContainerStyle={styles.scrollContent}
         >
           <View style={[styles.card, !isDark && styles.cardLight]}>
-            {/* Original Text Section */}
-            <View style={[styles.originalSection, !isDark && styles.originalSectionLight]}>
-              <TouchableOpacity
-                style={[styles.sectionHeader, !isDark && styles.sectionHeaderLight]}
-                onPress={() => setIsOriginalExpanded(!isOriginalExpanded)}
-                activeOpacity={0.7}
+            {/* Original Text Section: collapsed = whole card pressable; expanded = header pressable to collapse + scroll */}
+            {!isOriginalExpanded ? (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.originalSection,
+                  !isDark && styles.originalSectionLight,
+                  pressed && styles.originalSectionPressed
+                ]}
+                onPress={() => setIsOriginalExpanded(true)}
+                accessibilityRole="button"
+                accessibilityLabel={t("originalText")}
+                accessibilityHint={t("tapToViewFull")}
+                accessibilityState={{ expanded: false }}
               >
-                <Text style={[styles.sectionIcon, !isDark && styles.sectionIconLight]}>📄</Text>
-                <Text style={[styles.sectionTitle, !isDark && styles.sectionTitleLight]}>
-                  {t("originalText")}
-                </Text>
-                <View style={styles.expandButton}>
-                  <Text style={[styles.expandIcon, !isDark && styles.expandIconLight]}>
-                    {isOriginalExpanded ? "▼" : "▶"}
+                <View style={[styles.sectionHeader, !isDark && styles.sectionHeaderLight]}>
+                  <Text style={[styles.sectionIcon, !isDark && styles.sectionIconLight]}>📄</Text>
+                  <Text style={[styles.sectionTitle, !isDark && styles.sectionTitleLight]}>
+                    {t("originalText")}
                   </Text>
+                  <View style={styles.expandButton}>
+                    <Text style={[styles.expandIcon, !isDark && styles.expandIconLight]}>▶</Text>
+                  </View>
                 </View>
-              </TouchableOpacity>
-              {isOriginalExpanded && (
-                <ScrollView style={styles.originalContent} nestedScrollEnabled>
-                  <Text style={[styles.originalText, getTextSizeStyle(), !isDark && styles.textDark]}>
-                    {cached.originalText}
-                  </Text>
-                </ScrollView>
-              )}
-              {!isOriginalExpanded && (
                 <View style={styles.collapsedPreview}>
                   <Text
                     style={[styles.previewText, getTextSizeStyle(), !isDark && styles.textMutedDark]}
@@ -464,8 +458,41 @@ export default function ReaderScreen() {
                     {t("tapToViewFull")}
                   </Text>
                 </View>
-              )}
-            </View>
+              </Pressable>
+            ) : (
+              <View style={[styles.originalSection, !isDark && styles.originalSectionLight]}>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.originalSectionHeaderPressable,
+                    styles.sectionHeader,
+                    !isDark && styles.sectionHeaderLight,
+                    pressed && styles.originalSectionPressed
+                  ]}
+                  onPress={() => setIsOriginalExpanded(false)}
+                  accessibilityRole="button"
+                  accessibilityLabel={t("originalText")}
+                  accessibilityHint={t("tapToCollapseOriginal")}
+                  accessibilityState={{ expanded: true }}
+                >
+                  <Text style={[styles.sectionIcon, !isDark && styles.sectionIconLight]}>📄</Text>
+                  <Text style={[styles.sectionTitle, !isDark && styles.sectionTitleLight]}>
+                    {t("originalText")}
+                  </Text>
+                  <View style={styles.expandButton}>
+                    <Text style={[styles.expandIcon, !isDark && styles.expandIconLight]}>▼</Text>
+                  </View>
+                </Pressable>
+                <ScrollView
+                  style={styles.originalContent}
+                  nestedScrollEnabled
+                  showsVerticalScrollIndicator
+                >
+                  <Text style={[styles.originalText, getTextSizeStyle(), !isDark && styles.textDark]}>
+                    {cached.originalText}
+                  </Text>
+                </ScrollView>
+              </View>
+            )}
 
             {/* Simple Summary Section */}
             {isDark ? (
@@ -720,6 +747,14 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.06,
     shadowRadius: 14,
     elevation: 3
+  },
+  originalSectionPressed: {
+    opacity: 0.92
+  },
+  /** Minimum touch height for expand/collapse control (expanded header). */
+  originalSectionHeaderPressable: {
+    minHeight: 44,
+    justifyContent: "center"
   },
   sectionHeader: {
     flexDirection: "row",
