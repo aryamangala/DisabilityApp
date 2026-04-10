@@ -183,13 +183,87 @@ Password reset: Login → Forgot Password → Email code → New password
 
 | Service | Purpose |
 |---|---|
-| AWS Cognito | User authentication |
+| AWS Cognito | User authentication (already configured) |
 | AWS App Runner | Backend hosting (auto-scaling, 0.5 vCPU / 1 GB RAM) |
 | Amazon RDS PostgreSQL | Persistent database (`db.t3.small`) |
 | AWS Secrets Manager | OpenAI key and DB credentials |
 | EAS Build | Mobile app builds for iOS and Android |
 
-Update `mobile/eas.json` with your App Runner URL and Cognito IDs before building for production. Set all env vars as App Runner environment variables pointing to RDS instead of localhost.
+### Step 1: Create RDS PostgreSQL
+
+1. AWS Console → **RDS** → **Create database**
+2. Engine: **PostgreSQL 15**, Template: **Free tier**
+3. DB name: `disabilityapp`, username: `postgres`, choose a strong password
+4. Connectivity: enable **Public access** initially (lock down with VPC security groups later)
+5. Note down the **endpoint URL** after creation
+
+### Step 2: Push Backend to ECR
+
+```bash
+# Authenticate Docker with ECR (replace region and account ID)
+aws ecr get-login-password --region us-east-2 | \
+  docker login --username AWS --password-stdin \
+  YOUR_ACCOUNT_ID.dkr.ecr.us-east-2.amazonaws.com
+
+# Create repository
+aws ecr create-repository --repository-name clarodoc-backend --region us-east-2
+
+# Build and push (from the backend/ directory)
+cd backend
+docker build --platform linux/amd64 -t clarodoc-backend .
+docker tag clarodoc-backend:latest \
+  YOUR_ACCOUNT_ID.dkr.ecr.us-east-2.amazonaws.com/clarodoc-backend:latest
+docker push \
+  YOUR_ACCOUNT_ID.dkr.ecr.us-east-2.amazonaws.com/clarodoc-backend:latest
+```
+
+### Step 3: Create App Runner Service
+
+1. AWS Console → **App Runner** → **Create service**
+2. Source: **Container registry → Amazon ECR** → select `clarodoc-backend`
+3. Deployment trigger: **Automatic**
+4. Port: **4000**, CPU: **0.5 vCPU**, Memory: **1 GB**
+5. Add environment variables:
+
+| Key | Value |
+|---|---|
+| `NODE_ENV` | `production` |
+| `OPENAI_API_KEY` | your OpenAI key |
+| `COGNITO_USER_POOL_ID` | `us-east-2_BkarfNjFA` |
+| `COGNITO_CLIENT_ID` | `539pi38rggbrpe1i2m7t2f7t32` |
+| `DB_HOST` | your RDS endpoint |
+| `DB_PORT` | `5432` |
+| `DB_NAME` | `disabilityapp` |
+| `DB_USER` | `postgres` |
+| `DB_PASSWORD` | your RDS password |
+
+6. Note down the App Runner URL (e.g. `https://xxxx.us-east-2.awsapprunner.com`)
+
+> Database tables are created automatically on first backend startup — no manual SQL needed.
+
+### Step 4: Update Mobile Config
+
+In `mobile/eas.json`, replace the placeholder URL in all three build profiles:
+
+```json
+"EXPO_PUBLIC_BACKEND_URL": "https://xxxx.us-east-2.awsapprunner.com"
+```
+
+### Step 5: Build and Submit Mobile App
+
+```bash
+cd mobile
+
+# Internal testing build (Android APK + iOS)
+eas build --profile preview --platform all
+
+# Production build for App Store / Play Store
+eas build --profile production --platform all
+
+# Submit to stores
+eas submit --profile production --platform android
+eas submit --profile production --platform ios
+```
 
 ---
 

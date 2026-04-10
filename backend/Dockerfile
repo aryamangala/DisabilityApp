@@ -1,15 +1,8 @@
-# Debian bookworm: build sqlite3 in-image so the native addon matches this glibc (avoids
-# prebuilt binaries that expect a newer GLIBC than PaaS runtimes like Railway).
 FROM node:20-bookworm-slim AS build
 
 WORKDIR /app
 
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 make g++ \
-  && rm -rf /var/lib/apt/lists/*
-
 COPY package.json package-lock.json* ./
-ENV npm_config_build_from_source=true
 RUN npm ci --omit=dev
 
 COPY . .
