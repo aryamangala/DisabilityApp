@@ -1,8 +1,14 @@
 import { Platform } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { BACKEND_URL } from "./constants";
 import { getBackendUnreachableMessage } from "./backendErrors";
 import { devError, devLog, devWarn } from "./devLog";
+
+let SecureStore = null;
+if (Platform.OS !== "web") {
+  SecureStore = require("expo-secure-store");
+}
 
 const TEXT_REQUEST_TIMEOUT_MS = 180_000;
 const CHUNK_REQUEST_TIMEOUT_MS = 90_000;
@@ -28,18 +34,31 @@ function rethrowApiNetworkError(err) {
   throw err;
 }
 
+async function getAuthHeader() {
+  try {
+    let token;
+    if (SecureStore) {
+      token = await SecureStore.getItemAsync("cognito_access_token");
+    } else {
+      token = await AsyncStorage.getItem("cognito_access_token");
+    }
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  } catch {
+    return {};
+  }
+}
+
 async function handleResponse(resp) {
   let data = null;
   let rawText = null;
-  
+
   try {
-    rawText = await resp.text(); // Get raw text first
+    rawText = await resp.text();
     if (rawText) {
       data = JSON.parse(rawText);
     }
   } catch (e) {
     devWarn("Failed to parse JSON response:", e);
-    // If it's not JSON, use the raw text as the error message
     if (rawText && rawText.trim()) {
       data = { error: rawText.trim() };
     }
@@ -47,16 +66,17 @@ async function handleResponse(resp) {
 
   if (!resp.ok) {
     let message = `Request failed with status ${resp.status}`;
-    
-    // Handle rate limiting specifically
+
     if (resp.status === 429) {
       message = data?.error || "Too many requests. Please wait a moment and try again.";
+    } else if (resp.status === 401) {
+      message = "Your session has expired. Please sign in again.";
     } else if (data && data.error) {
       message = data.error;
     } else if (rawText) {
       message = rawText.trim();
     }
-    
+
     const error = new Error(message);
     error.status = resp.status;
     throw error;
@@ -95,6 +115,7 @@ async function webUriToFile(uri, fallbackName, mimeType) {
 
 export async function createDocumentFromText({ title, language, text }) {
   assertBackendConfigured();
+  const authHeader = await getAuthHeader();
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), TEXT_REQUEST_TIMEOUT_MS);
   try {
@@ -102,9 +123,7 @@ export async function createDocumentFromText({ title, language, text }) {
     const resp = await fetch(`${BACKEND_URL}/documents`, {
       method: "POST",
       signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json"
-      },
+      headers: { "Content-Type": "application/json", ...authHeader },
       body: JSON.stringify({ title, language, text })
     });
     return await handleResponse(resp);
@@ -143,6 +162,7 @@ export async function createDocumentFromFile({
     imagePages.length > 0;
 
   assertBackendConfigured();
+  const authHeader = await getAuthHeader();
 
   if (Platform.OS === "web") {
     if (useMultiImage) {
@@ -157,9 +177,7 @@ export async function createDocumentFromFile({
               p.mimeType || "image/jpeg"
             );
           } else {
-            throw new Error(
-              "Unsupported image URI. Please capture pages again."
-            );
+            throw new Error("Unsupported image URI. Please capture pages again.");
           }
         }
         if (fileToUpload && fileToUpload.size > MAX_UPLOAD_BYTES) {
@@ -168,11 +186,7 @@ export async function createDocumentFromFile({
         if (!fileToUpload) {
           throw new Error(`Page ${i + 1} could not be read.`);
         }
-        formData.append(
-          "files",
-          fileToUpload,
-          p.name || `page_${i + 1}.jpg`
-        );
+        formData.append("files", fileToUpload, p.name || `page_${i + 1}.jpg`);
       }
     } else {
       let fileToUpload = file;
@@ -186,28 +200,18 @@ export async function createDocumentFromFile({
       if (!fileToUpload && uri) {
         try {
           if (uri.startsWith("blob:") || uri.startsWith("data:")) {
-            fileToUpload = await webUriToFile(
-              uri,
-              name || "upload",
-              mimeType || "application/octet-stream"
-            );
+            fileToUpload = await webUriToFile(uri, name || "upload", mimeType || "application/octet-stream");
           } else {
-            throw new Error(
-              "Unsupported file URI format. Please try selecting the file again."
-            );
+            throw new Error("Unsupported file URI format. Please try selecting the file again.");
           }
         } catch (e) {
           if (e.message.includes("too large")) throw e;
-          throw new Error(
-            `Failed to read file: ${e.message}. Please try selecting the file again.`
-          );
+          throw new Error(`Failed to read file: ${e.message}. Please try selecting the file again.`);
         }
       }
 
       if (!fileToUpload) {
-        throw new Error(
-          "No file available to upload. Please select the file again."
-        );
+        throw new Error("No file available to upload. Please select the file again.");
       }
 
       formData.append("file", fileToUpload, name || "upload");
@@ -229,30 +233,22 @@ export async function createDocumentFromFile({
   }
 
   const pageCount = useMultiImage ? imagePages.length : 1;
-  // Server runs OCR (OpenAI) per page before HTTP responds — must cover upload + all pages.
   const uploadTimeoutMs =
     inputType === "image"
-      ? Math.min(1_800_000, 120_000 + pageCount * 240_000) // up to 30 min; ~4 min/page
-      : 180_000; // PDF parse is local on server; 3 min is enough for upload + parse
+      ? Math.min(1_800_000, 120_000 + pageCount * 240_000)
+      : 180_000;
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), uploadTimeoutMs);
 
   try {
-    devLog("[ClaroDoc] POST /documents →", BACKEND_URL, {
-      inputType,
-      pages: pageCount,
-      timeoutMs: uploadTimeoutMs,
-    });
+    devLog("[ClaroDoc] POST /documents →", BACKEND_URL, { inputType, pages: pageCount });
     const resp = await fetch(`${BACKEND_URL}/documents`, {
       method: "POST",
       signal: controller.signal,
-      headers: {},
+      headers: { ...authHeader },
       body: formData
     });
-
-    devLog("Response status:", resp.status);
-
     return handleResponse(resp);
   } catch (e) {
     devError("createDocumentFromFile error:", e);
@@ -269,16 +265,17 @@ export async function createDocumentFromFile({
 
 export async function fetchChunk(docId, index, attempt = 0) {
   assertBackendConfigured();
+  const authHeader = await getAuthHeader();
   const url = `${BACKEND_URL}/documents/${encodeURIComponent(docId)}/chunks/${index}`;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), CHUNK_REQUEST_TIMEOUT_MS);
   try {
-    const resp = await fetch(url, { signal: controller.signal });
+    const resp = await fetch(url, { signal: controller.signal, headers: { ...authHeader } });
     return await handleResponse(resp);
   } catch (e) {
     if (e?.status === 404) {
       throw new Error(
-        "That section is no longer on the server. If you saved this document on the device, open it from Previous Files."
+        "That section could not be found. Please try re-importing the document."
       );
     }
     if (attempt < 1 && isRetryableChunkError(e)) {
@@ -286,9 +283,52 @@ export async function fetchChunk(docId, index, attempt = 0) {
       return fetchChunk(docId, index, attempt + 1);
     }
     if (e.name === "AbortError") {
-      throw new Error(
-        "Loading this section took too long. Check your connection and try again."
-      );
+      throw new Error("Loading this section took too long. Check your connection and try again.");
+    }
+    rethrowApiNetworkError(e);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+export async function fetchDocumentIndex() {
+  assertBackendConfigured();
+  const authHeader = await getAuthHeader();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
+  try {
+    const resp = await fetch(`${BACKEND_URL}/documents`, {
+      signal: controller.signal,
+      headers: { ...authHeader }
+    });
+    const data = await handleResponse(resp);
+    return data?.documents ?? [];
+  } catch (e) {
+    devError("fetchDocumentIndex error:", e);
+    if (e.name === "AbortError") {
+      throw new Error("Could not load your documents. Check your connection.");
+    }
+    rethrowApiNetworkError(e);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+export async function deleteDocument(docId) {
+  assertBackendConfigured();
+  const authHeader = await getAuthHeader();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
+  try {
+    const resp = await fetch(
+      `${BACKEND_URL}/documents/${encodeURIComponent(docId)}`,
+      { method: "DELETE", signal: controller.signal, headers: { ...authHeader } }
+    );
+    return await handleResponse(resp);
+  } catch (e) {
+    devError("deleteDocument error:", e);
+    if (e.name === "AbortError") {
+      throw new Error("Delete request timed out. Please try again.");
     }
     rethrowApiNetworkError(e);
   } finally {
@@ -305,13 +345,10 @@ export async function checkHealth() {
     return await handleResponse(resp);
   } catch (e) {
     if (e.name === "AbortError") {
-      throw new Error(
-        "The service did not respond in time. You may be offline or the server is busy."
-      );
+      throw new Error("The service did not respond in time. You may be offline or the server is busy.");
     }
     rethrowApiNetworkError(e);
   } finally {
     clearTimeout(timeoutId);
   }
 }
-

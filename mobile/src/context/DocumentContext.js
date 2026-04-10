@@ -7,9 +7,11 @@ import React, {
   useState
 } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { fetchDocumentIndex, deleteDocument } from "../api";
 
 const DocumentContext = createContext(null);
 
+// Local cache keys (used as offline fallback only)
 const DOC_INDEX_KEY = "@clarodoc_doc_index_v1";
 const docKey = (docId) => `@clarodoc_doc_v1:${docId}`;
 
@@ -19,42 +21,53 @@ export function DocumentProvider({ children }) {
   const [currentChunkIndex, setCurrentChunkIndex] = useState(0);
   const [chunksCache, setChunksCache] = useState({});
   const [restoring, setRestoring] = useState(true);
-  const [docIndex, setDocIndex] = useState([]); // [{ docId, title, createdAt, chunkCount }]
+  const [docIndex, setDocIndex] = useState([]);
 
+  // On mount: load from local cache immediately, then refresh from API
   useEffect(() => {
     (async () => {
       try {
         const raw = await AsyncStorage.getItem(DOC_INDEX_KEY);
         if (raw) {
           const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) {
-            setDocIndex(parsed);
-          }
+          if (Array.isArray(parsed)) setDocIndex(parsed);
         }
       } catch {
-        // ignore; keep empty index
+        // ignore; keep empty
       } finally {
         setRestoring(false);
       }
     })();
   }, []);
 
+  // Fetch the authoritative document list from the API and sync local cache
   const refreshDocIndex = useCallback(async () => {
     try {
-      const raw = await AsyncStorage.getItem(DOC_INDEX_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          setDocIndex(parsed);
-          return;
-        }
+      const apiDocs = await fetchDocumentIndex();
+      if (Array.isArray(apiDocs)) {
+        setDocIndex(apiDocs);
+        await AsyncStorage.setItem(DOC_INDEX_KEY, JSON.stringify(apiDocs)).catch(() => {});
+        return;
       }
     } catch {
-      // ignore
+      // API unavailable — fall back to local cache
+      try {
+        const raw = await AsyncStorage.getItem(DOC_INDEX_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            setDocIndex(parsed);
+            return;
+          }
+        }
+      } catch {
+        // ignore
+      }
     }
     setDocIndex([]);
   }, []);
 
+  // Save a processed document to local AsyncStorage as an offline cache
   const upsertLocalDocument = async ({ docId, title, createdAt, chunkCount, chunks }) => {
     const safeCreatedAt = createdAt || new Date().toISOString();
     const safeTitle = title || "Untitled";
@@ -64,10 +77,7 @@ export function DocumentProvider({ children }) {
       createdAt: safeCreatedAt,
       chunkCount: Number.isInteger(chunkCount) ? chunkCount : chunks?.length || 0,
     };
-    const docPayload = {
-      ...record,
-      chunks: Array.isArray(chunks) ? chunks : [],
-    };
+    const docPayload = { ...record, chunks: Array.isArray(chunks) ? chunks : [] };
     try {
       await AsyncStorage.setItem(docKey(docId), JSON.stringify(docPayload));
     } catch {
@@ -75,7 +85,7 @@ export function DocumentProvider({ children }) {
         "Could not save this document on your device. Free some storage space and try again."
       );
     }
-
+    // Update local index cache
     let existingIndex = [];
     try {
       const raw = await AsyncStorage.getItem(DOC_INDEX_KEY);
@@ -90,32 +100,30 @@ export function DocumentProvider({ children }) {
     try {
       await AsyncStorage.setItem(DOC_INDEX_KEY, JSON.stringify(nextIndex));
     } catch {
-      throw new Error(
-        "Could not update your document list on this device. Free some storage space and try again."
-      );
+      // ignore index write failure; document data is still saved
     }
     setDocIndex(nextIndex);
   };
 
   const getLocalDocument = async (docId) => {
-    if (docId == null || typeof docId !== "string" || !docId.trim()) {
-      return null;
-    }
-    let raw;
+    if (!docId || typeof docId !== "string" || !docId.trim()) return null;
     try {
-      raw = await AsyncStorage.getItem(docKey(docId));
-    } catch {
-      return null;
-    }
-    if (!raw) return null;
-    try {
-      return JSON.parse(raw);
+      const raw = await AsyncStorage.getItem(docKey(docId));
+      return raw ? JSON.parse(raw) : null;
     } catch {
       return null;
     }
   };
 
+  // Delete from API (source of truth) + remove from local cache
   const deleteLocalDocument = async (deleteDocId) => {
+    // Always attempt API delete first
+    try {
+      await deleteDocument(deleteDocId);
+    } catch {
+      // If API delete fails, still clean up local cache
+    }
+    // Remove from local cache
     try {
       await AsyncStorage.removeItem(docKey(deleteDocId));
     } catch {
@@ -139,7 +147,6 @@ export function DocumentProvider({ children }) {
     }
     setDocIndex(nextIndex);
 
-    // If the user deleted the currently open document, clear session state.
     if (docId && deleteDocId === docId) {
       setDocId(null);
       setChunkCount(null);
@@ -172,10 +179,7 @@ export function DocumentProvider({ children }) {
     setCurrentChunkIndex,
     chunksCache,
     setChunkInCache: (index, data) => {
-      setChunksCache((prev) => ({
-        ...prev,
-        [index]: data
-      }));
+      setChunksCache((prev) => ({ ...prev, [index]: data }));
     },
     docIndex,
     refreshDocIndex,
@@ -202,9 +206,6 @@ export function DocumentProvider({ children }) {
 
 export function useDocument() {
   const ctx = useContext(DocumentContext);
-  if (!ctx) {
-    throw new Error("useDocument must be used within DocumentProvider");
-  }
+  if (!ctx) throw new Error("useDocument must be used within DocumentProvider");
   return ctx;
 }
-

@@ -1,87 +1,62 @@
-import sqlite3 from "sqlite3";
-import path from "path";
-import { fileURLToPath } from "url";
+import pg from "pg";
 
-if (process.env.NODE_ENV !== "production") {
-  sqlite3.verbose();
+const { Pool } = pg;
+
+export const pool = new Pool({
+  host: process.env.DB_HOST,
+  port: parseInt(process.env.DB_PORT || "5432", 10),
+  database: process.env.DB_NAME,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
+  max: 10,
+  idleTimeoutMillis: 30000,
+});
+
+export async function initDb() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS documents (
+      id SERIAL PRIMARY KEY,
+      doc_id TEXT UNIQUE NOT NULL,
+      user_id TEXT NOT NULL,
+      title TEXT,
+      language TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS chunks (
+      id SERIAL PRIMARY KEY,
+      doc_id TEXT NOT NULL REFERENCES documents(doc_id) ON DELETE CASCADE,
+      chunk_index INTEGER NOT NULL,
+      heading TEXT,
+      original_text TEXT NOT NULL,
+      easyread_json JSONB,
+      UNIQUE (doc_id, chunk_index)
+    )
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON chunks (doc_id)
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_documents_user_id ON documents (user_id)
+  `);
 }
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, "easyread.db");
-
-export const db = new sqlite3.Database(DB_PATH);
-
-export function initDb() {
-  db.serialize(() => {
-    db.run(`
-      CREATE TABLE IF NOT EXISTS documents (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        docId TEXT UNIQUE NOT NULL,
-        title TEXT,
-        language TEXT,
-        createdAt TEXT NOT NULL
-      )
-    `);
-
-    db.run(`
-      CREATE TABLE IF NOT EXISTS chunks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        docId TEXT NOT NULL,
-        chunkIndex INTEGER NOT NULL,
-        heading TEXT,
-        originalText TEXT NOT NULL,
-        easyreadJson TEXT,
-        quizJson TEXT,
-        unlocked INTEGER NOT NULL DEFAULT 0,
-        completed INTEGER NOT NULL DEFAULT 0,
-        quizAttempts INTEGER NOT NULL DEFAULT 0,
-        UNIQUE (docId, chunkIndex)
-      )
-    `);
-
-    db.run(`
-      CREATE INDEX IF NOT EXISTS idx_chunks_docId
-      ON chunks (docId)
-    `);
-
-    // Migration: Add quizAttempts column if it doesn't exist
-    db.run(`
-      ALTER TABLE chunks
-      ADD COLUMN quizAttempts INTEGER NOT NULL DEFAULT 0
-    `, (err) => {
-      // Ignore error if column already exists
-      if (err && !err.message.includes("duplicate column")) {
-        console.error("[EasyRead] DB migration:", err.message);
-      }
-    });
-  });
+export async function dbGet(sql, params = []) {
+  const result = await pool.query(sql, params);
+  return result.rows[0] ?? null;
 }
 
-export function dbGet(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
-      if (err) reject(err);
-      else resolve(row);
-    });
-  });
+export async function dbAll(sql, params = []) {
+  const result = await pool.query(sql, params);
+  return result.rows;
 }
 
-export function dbAll(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) reject(err);
-      else resolve(rows);
-    });
-  });
+export async function dbRun(sql, params = []) {
+  const result = await pool.query(sql, params);
+  return result;
 }
-
-export function dbRun(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function (err) {
-      if (err) reject(err);
-      else resolve(this);
-    });
-  });
-}
-

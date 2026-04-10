@@ -15,6 +15,8 @@ import {
   deriveHeading
 } from "./textUtils.mjs";
 import { ocrImageToText, generateEasyRead } from "./openaiClient.mjs";
+import { pool, initDb, dbGet, dbAll, dbRun } from "./db.mjs";
+import { requireAuth } from "./authMiddleware.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -30,13 +32,14 @@ const corsOrigins = process.env.CORS_ORIGIN
       .map((s) => s.trim())
       .filter(Boolean)
   : [];
+
 app.use(
   cors(
     corsOrigins.length
-      ? { origin: corsOrigins }
+      ? { origin: corsOrigins, allowedHeaders: ["Content-Type", "Authorization"] }
       : {
-          // Mobile apps typically send no Origin; allow non-browser clients.
           origin: (origin, cb) => cb(null, true),
+          allowedHeaders: ["Content-Type", "Authorization"],
         }
   )
 );
@@ -44,10 +47,7 @@ app.use(express.json({ limit: "10mb" }));
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 10 * 1024 * 1024, // per file
-    files: 25
-  }
+  limits: { fileSize: 10 * 1024 * 1024, files: 25 }
 });
 
 const documentUpload = upload.fields([
@@ -72,11 +72,11 @@ function documentUploadWithErrorLogging(req, res, next) {
 }
 
 const isProduction = process.env.NODE_ENV === "production";
-/** Verbose request tracing (off in production unless LOG_VERBOSE=true). */
 const logVerbose = !isProduction || process.env.LOG_VERBOSE === "true";
 function devLog(...args) {
   if (logVerbose) console.log(...args);
 }
+
 const limiter = rateLimit({
   windowMs: 60 * 1000,
   max: isProduction ? 120 : 500,
@@ -85,69 +85,24 @@ const limiter = rateLimit({
   message: JSON.stringify({ error: "Too many requests. Please wait a moment and try again." }),
   skip: (req) => {
     const ip = req.ip || "";
-    return (
-      ip === "127.0.0.1" ||
-      ip === "::1" ||
-      ip.startsWith("::ffff:127.0.0.1")
-    );
+    return ip === "127.0.0.1" || ip === "::1" || ip.startsWith("::ffff:127.0.0.1");
   },
 });
 app.use(limiter);
-
-/**
- * Ephemeral document store.
- *
- * Goal: do NOT persist original files or translated content (no DB writes).
- * We keep results in memory for the current session so the mobile app can fetch
- * chunks by index after /documents returns docId + chunkCount.
- *
- * Cleanup: TTL-based eviction to avoid unbounded memory growth.
- */
-const EPHEMERAL_DOC_TTL_MS = 60 * 60 * 1000; // 1 hour
-const ephemeralDocs = new Map(); // docId -> { createdAtMs, language, chunks: [{ heading, originalText, easyread }] }
-
-function pruneEphemeralDocs(nowMs = Date.now()) {
-  for (const [docId, value] of ephemeralDocs.entries()) {
-    if (!value?.createdAtMs || nowMs - value.createdAtMs > EPHEMERAL_DOC_TTL_MS) {
-      ephemeralDocs.delete(docId);
-    }
-  }
-}
 
 function generateDocId() {
   return crypto.randomBytes(12).toString("hex");
 }
 
 function cleanAndChunk(rawText) {
-  // Optimized: skip expensive operations for very short texts
   if (!rawText || rawText.trim().length < 500) {
     const chunks = chunkText(rawText);
-    return { normalized: rawText, chunks };
+    return { chunks };
   }
-  
   const noHeaders = removeHeadersFooters(rawText);
   const normalized = normalizeLines(noHeaders);
   const chunks = chunkText(normalized);
-  return { normalized, chunks };
-}
-
-function createEphemeralDocument({ language, text }) {
-  pruneEphemeralDocs();
-  const docId = generateDocId();
-  const { chunks } = cleanAndChunk(text);
-
-  const payload = {
-    createdAtMs: Date.now(),
-    language: language || "auto",
-    chunks: chunks.map((chunk) => ({
-      heading: deriveHeading(chunk),
-      originalText: chunk,
-      easyread: null
-    }))
-  };
-
-  ephemeralDocs.set(docId, payload);
-  return { docId, chunkCount: payload.chunks.length };
+  return { chunks };
 }
 
 function mimeFromFilename(name) {
@@ -158,6 +113,8 @@ function mimeFromFilename(name) {
   if (lower.endsWith(".pdf")) return "application/pdf";
   return "application/octet-stream";
 }
+
+// ── Routes ──────────────────────────────────────────────────────────────────
 
 app.get("/health", (req, res) => {
   res.json({ ok: true });
@@ -178,15 +135,33 @@ if (process.env.ALLOW_DIAGNOSTICS === "true") {
   });
 }
 
+// List all documents belonging to the authenticated user
+app.get("/documents", requireAuth, async (req, res) => {
+  try {
+    const rows = await dbAll(
+      `SELECT doc_id AS "docId", title, language, created_at AS "createdAt",
+              (SELECT COUNT(*) FROM chunks WHERE chunks.doc_id = documents.doc_id) AS "chunkCount"
+       FROM documents
+       WHERE user_id = $1
+       ORDER BY created_at DESC`,
+      [req.userId]
+    );
+    res.json({ documents: rows });
+  } catch (err) {
+    console.error("GET /documents error:", err);
+    res.status(500).json({ error: "Failed to fetch documents." });
+  }
+});
+
+// Upload / create a new document
 app.post(
   "/documents",
+  requireAuth,
   (req, res, next) => {
     devLog("[POST /documents] request started", {
       ts: new Date().toISOString(),
       contentType: req.headers["content-type"],
-      contentLength: req.headers["content-length"],
       ip: req.ip,
-      host: req.headers.host
     });
     next();
   },
@@ -194,137 +169,105 @@ app.post(
   async (req, res) => {
     try {
       const contentType = req.headers["content-type"] || "";
+      let extractedText = "";
+      let title = "";
+      let language = "auto";
 
       if (contentType.includes("application/json")) {
-        const { title, language = "auto", text } = req.body || {};
-        if (!text || typeof text !== "string" || !text.trim()) {
-          return res.status(400).json({
-            error: "Missing 'text' in request body."
-          });
+        ({ title = "", language = "auto", text: extractedText = "" } = req.body || {});
+        if (!extractedText || typeof extractedText !== "string" || !extractedText.trim()) {
+          return res.status(400).json({ error: "Missing 'text' in request body." });
+        }
+      } else if (contentType.includes("multipart/form-data")) {
+        const fileField = req.files?.file?.[0];
+        const filesField = req.files?.files || [];
+        let inputType;
+        ({ title = "", language = "auto", inputType } = req.body || {});
+
+        if (inputType !== "pdf" && inputType !== "image") {
+          return res.status(400).json({ error: "inputType must be 'pdf' or 'image'." });
         }
 
-        // Skip sensitive content check for speed - can be re-enabled if needed
-        // const sensitive = await isContentHighlySensitive(text);
-        // if (sensitive) { ... }
-
-        const { docId, chunkCount } = createEphemeralDocument({
-          language,
-          text
-        });
-
-        return res.json({ docId, chunkCount });
-      }
-
-      if (!contentType.includes("multipart/form-data")) {
-        return res.status(400).json({
-          error:
-            "Unsupported Content-Type. Use application/json or multipart/form-data."
-        });
-      }
-
-      const fileField = req.files?.file?.[0];
-      const filesField = req.files?.files || [];
-      const { title, language = "auto", inputType } = req.body || {};
-
-      devLog("File upload received:", {
-        hasSingleFile: !!fileField,
-        multiCount: filesField.length,
-        inputType
-      });
-
-      if (inputType !== "pdf" && inputType !== "image") {
-        return res
-          .status(400)
-          .json({ error: "inputType must be 'pdf' or 'image'." });
-      }
-
-      devLog("Starting text extraction for:", inputType);
-      let extractedText = "";
-
-      if (inputType === "pdf") {
-        if (!fileField) {
-          console.error("No PDF file received");
-          return res.status(400).json({ error: "Missing file field." });
-        }
-        devLog("Parsing PDF, size:", fileField.buffer.length, "bytes");
-        const pdfData = await pdfParse(fileField.buffer);
-        extractedText = (pdfData.text || "").trim();
-        devLog("PDF text extracted, length:", extractedText.length);
-
-        if (extractedText.length < 200) {
-          return res.status(400).json({
-            error:
-              "This PDF appears to be scanned or image-based. " +
-              "Scanned PDFs are not supported in this version. " +
-              "Please upload a text-based PDF or a clear photo of the document."
-          });
-        }
-      } else if (inputType === "image") {
-        const imageBuffers =
-          filesField.length > 0 ? filesField : fileField ? [fileField] : [];
-        if (imageBuffers.length === 0) {
-          return res.status(400).json({
-            error: "Missing image file(s). Send one 'file' or multiple 'files' parts."
-          });
-        }
-        if (imageBuffers.length > 24) {
-          return res.status(400).json({
-            error: "Too many images (maximum 24 pages per document)."
-          });
-        }
-
-        devLog("Processing image OCR, page count:", imageBuffers.length);
-        const parts = [];
-        for (let i = 0; i < imageBuffers.length; i++) {
-          const img = imageBuffers[i];
-          const mimeType = img.mimetype || mimeFromFilename(img.originalname);
-          const base64 = img.buffer.toString("base64");
-          if (i > 0) {
-            await new Promise((r) => setTimeout(r, 400));
+        if (inputType === "pdf") {
+          if (!fileField) return res.status(400).json({ error: "Missing file field." });
+          devLog("Parsing PDF, size:", fileField.buffer.length, "bytes");
+          const pdfData = await pdfParse(fileField.buffer);
+          extractedText = (pdfData.text || "").trim();
+          if (extractedText.length < 200) {
+            return res.status(400).json({
+              error:
+                "This PDF appears to be scanned or image-based. " +
+                "Please upload a text-based PDF or a clear photo of the document."
+            });
           }
-          const pageText = await ocrImageToText(base64, mimeType);
-          parts.push(
-            `\n\n--- Page ${i + 1} ---\n\n${(pageText || "").trim()}`
-          );
+          if (!title) title = fileField.originalname || "";
+        } else {
+          const imageBuffers = filesField.length > 0 ? filesField : fileField ? [fileField] : [];
+          if (imageBuffers.length === 0) {
+            return res.status(400).json({ error: "Missing image file(s)." });
+          }
+          if (imageBuffers.length > 24) {
+            return res.status(400).json({ error: "Too many images (maximum 24 pages)." });
+          }
+          devLog("Processing image OCR, pages:", imageBuffers.length);
+          const parts = [];
+          for (let i = 0; i < imageBuffers.length; i++) {
+            const img = imageBuffers[i];
+            const mimeType = img.mimetype || mimeFromFilename(img.originalname);
+            if (i > 0) await new Promise((r) => setTimeout(r, 400));
+            const pageText = await ocrImageToText(img.buffer.toString("base64"), mimeType);
+            parts.push(`\n\n--- Page ${i + 1} ---\n\n${(pageText || "").trim()}`);
+          }
+          extractedText = parts.join("\n").trim();
         }
-        extractedText = parts.join("\n").trim();
-        devLog("OCR combined length:", extractedText.length);
+      } else {
+        return res.status(400).json({
+          error: "Unsupported Content-Type. Use application/json or multipart/form-data."
+        });
       }
 
       if (!extractedText || extractedText.trim().length < 20) {
-        return res.status(400).json({
-          error:
-            "Unable to extract enough text from this file. " +
-            "Please try a clearer document."
-        });
+        return res.status(400).json({ error: "Unable to extract enough text from this file." });
       }
 
-      // Skip sensitive content check for speed - can be re-enabled if needed
-      // const sensitive = await isContentHighlySensitive(extractedText);
-      // if (sensitive) { ... }
+      const { chunks } = cleanAndChunk(extractedText);
+      const docId = generateDocId();
+      const safeTitle = title || extractedText.slice(0, 60).replace(/\n/g, " ").trim();
 
-      devLog("Storing document and chunks...");
-      const fallbackName =
-        inputType === "pdf"
-          ? fileField?.originalname
-          : (filesField[0] || fileField)?.originalname;
-      const { docId, chunkCount } = createEphemeralDocument({
-        language,
-        text: extractedText
-      });
+      // Persist document and all chunks in a single transaction
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(
+          `INSERT INTO documents (doc_id, user_id, title, language) VALUES ($1, $2, $3, $4)`,
+          [docId, req.userId, safeTitle, language]
+        );
+        for (let i = 0; i < chunks.length; i++) {
+          await client.query(
+            `INSERT INTO chunks (doc_id, chunk_index, heading, original_text)
+             VALUES ($1, $2, $3, $4)`,
+            [docId, i, deriveHeading(chunks[i]), chunks[i]]
+          );
+        }
+        await client.query("COMMIT");
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
 
-      devLog("Document processed successfully:", { docId, chunkCount });
-      res.json({ docId, chunkCount });
+      devLog("Document saved:", { docId, chunkCount: chunks.length });
+      res.json({ docId, chunkCount: chunks.length });
     } catch (err) {
       console.error("POST /documents error:", err);
-      res.status(500).json({
-        error: "Failed to process document. Please try again."
-      });
+      res.status(500).json({ error: "Failed to process document. Please try again." });
     }
   }
 );
 
-app.get("/documents/:docId/chunks/:i", async (req, res) => {
+// Fetch a specific chunk (generates EasyRead on first access and caches to DB)
+app.get("/documents/:docId/chunks/:i", requireAuth, async (req, res) => {
   try {
     const { docId } = req.params;
     const index = parseInt(req.params.i, 10);
@@ -332,18 +275,20 @@ app.get("/documents/:docId/chunks/:i", async (req, res) => {
       return res.status(400).json({ error: "Invalid chunk index." });
     }
 
-    devLog("Fetching chunk:", { docId, index });
-
-    pruneEphemeralDocs();
-    const doc = ephemeralDocs.get(docId);
+    // Verify document belongs to this user
+    const doc = await dbGet(
+      `SELECT doc_id, language FROM documents WHERE doc_id = $1 AND user_id = $2`,
+      [docId, req.userId]
+    );
     if (!doc) {
-      return res.status(404).json({
-        error:
-          "Document not found (it may have expired). Please re-import the document."
-      });
+      return res.status(404).json({ error: "Document not found." });
     }
 
-    const chunk = doc.chunks?.[index];
+    const chunk = await dbGet(
+      `SELECT heading, original_text AS "originalText", easyread_json AS "easyread"
+       FROM chunks WHERE doc_id = $1 AND chunk_index = $2`,
+      [docId, index]
+    );
     if (!chunk) {
       return res.status(404).json({ error: "Chunk not found." });
     }
@@ -351,30 +296,17 @@ app.get("/documents/:docId/chunks/:i", async (req, res) => {
     let easyread = chunk.easyread;
     if (!easyread) {
       devLog("Generating EasyRead for chunk:", index);
-      if (!chunk.originalText || chunk.originalText.trim().length === 0) {
-        return res.status(500).json({
-          error: "Chunk text is empty. Please reprocess the document."
-        });
-      }
-
-      const language = doc.language || "auto";
-      const baseDelay = 500;
-      await new Promise((resolve) => setTimeout(resolve, baseDelay));
-      easyread = await generateEasyRead(chunk.originalText, language);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      easyread = await generateEasyRead(chunk.originalText, doc.language || "auto");
       if (!easyread || !easyread.title || !easyread.sentences) {
         throw new Error("Invalid EasyRead response structure");
       }
-
-      // Cache in memory for this session only (not persisted).
-      chunk.easyread = easyread;
+      // Persist generated EasyRead so it's never re-generated
+      await dbRun(
+        `UPDATE chunks SET easyread_json = $1 WHERE doc_id = $2 AND chunk_index = $3`,
+        [JSON.stringify(easyread), docId, index]
+      );
     }
-
-    // Precomputation disabled to prevent rate limits
-    // Chunks will be generated on-demand when accessed
-    // const nextIndex = index + 1;
-    // setTimeout(() => {
-    //   precomputeNextChunk(docId, nextIndex);
-    // }, 0);
 
     res.json({
       docId,
@@ -382,27 +314,46 @@ app.get("/documents/:docId/chunks/:i", async (req, res) => {
       heading: chunk.heading,
       originalText: chunk.originalText,
       easyread,
-      state: {
-        unlocked: true, // All chunks are unlocked
-        completed: false
-      }
+      state: { unlocked: true, completed: false }
     });
   } catch (err) {
     console.error("GET /documents/:docId/chunks/:i error:", err);
-    res.status(500).json({
-      error: "Failed to load chunk. Please try again.",
-    });
+    res.status(500).json({ error: "Failed to load chunk. Please try again." });
   }
 });
 
-// Quiz endpoint removed - quiz functionality disabled
+// Delete a document (and its chunks via CASCADE)
+app.delete("/documents/:docId", requireAuth, async (req, res) => {
+  try {
+    const { docId } = req.params;
+    const result = await dbRun(
+      `DELETE FROM documents WHERE doc_id = $1 AND user_id = $2`,
+      [docId, req.userId]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Document not found." });
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("DELETE /documents/:docId error:", err);
+    res.status(500).json({ error: "Failed to delete document." });
+  }
+});
 
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
   res.status(500).json({ error: "Internal server error." });
 });
 
-app.listen(PORT, () => {
-  console.log(`[EasyRead] listening on ${PORT}${isProduction ? " (production)" : ""}`);
-});
+// ── Start ────────────────────────────────────────────────────────────────────
 
+initDb()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`[EasyRead] listening on ${PORT}${isProduction ? " (production)" : ""}`);
+    });
+  })
+  .catch((err) => {
+    console.error("[EasyRead] Failed to initialize database:", err);
+    process.exit(1);
+  });

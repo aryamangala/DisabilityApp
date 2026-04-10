@@ -15,6 +15,7 @@ import ErrorBanner from "../components/ErrorBanner";
 import { useDocument } from "../context/DocumentContext";
 import { useSettings } from "../context/SettingsContext";
 import { getTranslation } from "../utils/translations";
+import { deleteDocument } from "../api";
 
 export default function PreviousFilesScreen() {
   const navigation = useNavigation();
@@ -80,37 +81,29 @@ export default function PreviousFilesScreen() {
   const onOpen = async (id) => {
     setError("");
     try {
-      const doc = await getLocalDocument(id);
-      if (!doc) {
-        setError(t("failedToLoad"));
-        return;
-      }
-
-      const n = Number(doc.chunkCount);
-      if (!Number.isInteger(n) || n < 1) {
-        setError(t("incompleteSavedFile"));
-        return;
-      }
-      if (!Array.isArray(doc.chunks) || doc.chunks.length < n) {
-        setError(t("incompleteSavedFile"));
-        return;
-      }
-      for (let i = 0; i < n; i++) {
-        if (doc.chunks[i] == null) {
-          setError(t("incompleteSavedFile"));
-          return;
-        }
-      }
+      // Find entry in index for chunkCount
+      const indexEntry = docIndex.find((d) => d.docId === id);
+      const n = indexEntry ? Number(indexEntry.chunkCount) : 0;
 
       await clearAll();
-      setDocId(doc.docId);
-      setChunkCount(n);
+      setDocId(id);
       setCurrentChunkIndex(0);
 
-      if (Array.isArray(doc.chunks)) {
-        doc.chunks.forEach((chunk, idx) => {
-          if (chunk) setChunkInCache(idx, chunk);
-        });
+      // Load from local cache if available (faster, works offline)
+      const doc = await getLocalDocument(id);
+      if (doc && Number.isInteger(Number(doc.chunkCount)) && Number(doc.chunkCount) > 0) {
+        setChunkCount(Number(doc.chunkCount));
+        if (Array.isArray(doc.chunks)) {
+          doc.chunks.forEach((chunk, idx) => {
+            if (chunk) setChunkInCache(idx, chunk);
+          });
+        }
+      } else if (n > 0) {
+        // No local cache — set chunkCount from index; Reader will fetch from API
+        setChunkCount(n);
+      } else {
+        setError(t("failedToLoad"));
+        return;
       }
 
       navigation.navigate("Reader");
@@ -132,9 +125,11 @@ export default function PreviousFilesScreen() {
 
   const onClearAll = async () => {
     if (!docIndex.length) return;
-    const ok = await confirm(t("clearAll") || "Clear all", t("clearAllConfirm") || "Delete all saved files on this device?");
+    const ok = await confirm(t("clearAll") || "Clear all", t("clearAllConfirm") || "Delete all saved files?");
     if (!ok) return;
     try {
+      // Delete each document from the API, then clear local cache
+      await Promise.allSettled(docIndex.map((d) => deleteDocument(d.docId)));
       await clearLocalDocuments();
       await refreshDocIndex();
     } catch (e) {

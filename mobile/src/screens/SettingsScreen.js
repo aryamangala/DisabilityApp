@@ -8,11 +8,13 @@ import {
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { useSettings } from "../context/SettingsContext";
+import { useAuth } from "../context/AuthContext";
 import { getTranslation } from "../utils/translations";
 
 export default function SettingsScreen() {
   const navigation = useNavigation();
   const { textSize, setTextSize, language, setLanguage, theme, setTheme, getTextSizeStyle } = useSettings();
+  const { signOut, user } = useAuth();
   const t = (key) => getTranslation(key, language);
 
   const textSizes = [
@@ -163,6 +165,15 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           </View>
         </View>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Account</Text>
+          <Text style={styles.sectionDescription} numberOfLines={1} ellipsizeMode="tail">
+            Signed in as {user?.getUsername?.() || ""}
+          </Text>
+          <TouchableOpacity style={styles.signOutButton} onPress={signOut}>
+            <Text style={styles.signOutText}>Sign Out</Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     </View>
   );
@@ -272,5 +283,17 @@ const styles = StyleSheet.create({
   previewText: {
     color: "#111827",
     lineHeight: 22
-  }
+  },
+  signOutButton: {
+    marginTop: 4,
+    backgroundColor: "#8F2D12",
+    borderRadius: 12,
+    padding: 14,
+    alignItems: "center",
+  },
+  signOutText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 15,
+  },
 });

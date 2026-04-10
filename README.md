@@ -1,260 +1,213 @@
-# DisabilityApp
-An app to translate complex legal and medical documents into an EasyRead format for individuals with intellectual disabilities to have greater autonomy
+# ClaroDoc
 
-# EasyRead App - Setup Guide for Mac
+An app that converts complex legal and medical documents into EasyRead format for individuals with intellectual disabilities, giving them greater autonomy over important documents.
 
-A document processing app that converts complex legal documents into EasyRead format for individuals with intellectual disabilities. Built with Node.js/Express backend and Expo React Native mobile app.
-
-## Prerequisites
-
-Before you begin, ensure you have the following installed on your Mac:
-
-### 1. Node.js and npm
-- **Node.js** (version 16 or higher recommended)
-- **npm** (comes with Node.js)
-
-To check if you have them installed:
-```bash
-node --version
-npm --version
-```
-
-If not installed, download from: https://nodejs.org/
-
-### 2. Expo CLI (for mobile app)
-```bash
-npm install -g expo-cli
-```
-
-Or use npx (no installation needed):
-```bash
-npx expo --version
-```
-
-### 3. OpenAI API Key (backend only)
-
-- Sign up at https://platform.openai.com/
-- Create an API key from https://platform.openai.com/api-keys
-- **Never** put this key in the mobile app or in any `EXPO_PUBLIC_*` variable (those values ship in the client bundle). Use `backend/.env` locally and your host’s secret store in production (e.g. Railway variables).
-
-## Project Structure
+## Architecture
 
 ```
-easyread/
-├── backend/          # Node.js/Express backend server
-│   ├── .env         # Environment variables (API key)
-│   ├── server.mjs   # Main server file
-│   └── ...
-└── mobile/          # Expo React Native mobile app
-    ├── src/         # Source code
-    └── ...
+Mobile App (Expo React Native)
+  └── AWS Cognito          — email/password authentication
+  └── Backend API          — Node.js/Express
+        └── PostgreSQL     — persistent document + chunk storage (RDS in production, Docker locally)
+        └── OpenAI GPT-4o  — OCR and EasyRead generation
 ```
 
-## Setup Instructions
-
-### Step 1: Backend Setup
-
-1. **Navigate to backend directory:**
-   ```bash
-   cd easyread/backend
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   npm install
-   ```
-
-3. **Create `.env` file:**
-   Copy `backend/.env.example` to `backend/.env` and set `OPENAI_API_KEY` and optional vars. Do not commit `.env`.
-
-4. **Initialize the database:**
-   The database will be created automatically when you start the server.
-
-### Step 2: Mobile App Setup
-
-1. **Navigate to mobile directory:**
-   ```bash
-   cd easyread/mobile
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   npm install
-   ```
-
-3. **Install Expo CLI (if not already installed):**
-   ```bash
-   npm install -g expo-cli
-   ```
-
-4. **Configure backend URL (mobile):**
-   Copy `mobile/.env.example` to `mobile/.env` and adjust:
-   - **Test against hosted API (default):** set `EXPO_PUBLIC_BACKEND_URL` to your HTTPS API (same host as `defaultPublicBackend.json` / `eas.json`).
-   - **Simulator/emulator + local `npm start` backend:** set `EXPO_PUBLIC_USE_LOCAL_BACKEND=true` (and leave `EXPO_PUBLIC_BACKEND_URL` unset) so Android emulator uses `10.0.2.2:4000` and iOS simulator uses `127.0.0.1:4000`.
-   - **Physical device + local backend:** set `EXPO_PUBLIC_BACKEND_URL=http://YOUR_LAN_IP:4000` (phone must reach that IP).
-   
-   Resolution order and release safety are implemented in `mobile/src/backendResolution.js` (local/LAN URLs are ignored in release builds).
-   
-   To find your Mac's LAN IP:
-   ```bash
-   ipconfig getifaddr en0
-   ```
-
-## Running the Application
-
-### Terminal 1: Start the Backend Server
-
-```bash
-cd easyread/backend
-npm start
-```
-
-You should see:
-```
-EasyRead backend listening on port 4000
-```
-
-The server will run on `http://localhost:4000`
-
-### Terminal 2: Start the Mobile App
-
-```bash
-cd easyread/mobile
-npm start
-```
-
-Or using Expo CLI:
-```bash
-npx expo start
-```
-
-This will open the Expo development tools. You can then:
-
-- **Press `w`** to open in web browser
-- **Press `a`** to open in Android emulator (requires Android Studio)
-- **Scan QR code** with Expo Go app on your phone (iOS/Android)
-
-## Testing Options
-
-### Option 1: Web Browser (Easiest)
-1. Start backend server
-2. Start mobile app with `npm start`
-3. Press `w` to open in browser
-4. App will open at `http://localhost:8081` or `http://localhost:19006`
-
-### Option 2: Physical Device (Recommended for mobile testing)
-1. Install **Expo Go** app on your phone:
-   - iOS: App Store
-   - Android: Google Play Store
-2. Ensure phone and Mac are on the same Wi-Fi network
-3. Set `EXPO_PUBLIC_BACKEND_URL=http://YOUR_MAC_LAN_IP:4000` in `mobile/.env`
-4. Start backend server
-5. Start mobile app
-6. Scan QR code with Expo Go app
-
-### Option 3: Android Emulator
-1. Install **Android Studio** from https://developer.android.com/studio
-2. Set up Android SDK and create an emulator
-3. Set `ANDROID_HOME` environment variable:
-   ```bash
-   export ANDROID_HOME=$HOME/Library/Android/sdk
-   export PATH=$PATH:$ANDROID_HOME/emulator
-   export PATH=$PATH:$ANDROID_HOME/tools
-   export PATH=$PATH:$ANDROID_HOME/tools/bin
-   export PATH=$PATH:$ANDROID_HOME/platform-tools
-   ```
-4. Start emulator from Android Studio
-5. Start mobile app and press `a`
-
-## Common Issues and Solutions
-
-### Backend Issues
-
-**Port 4000 already in use:**
-```bash
-# Find process using port 4000
-lsof -ti:4000
-
-# Kill the process
-kill -9 $(lsof -ti:4000)
-```
-
-**OpenAI API key error:**
-- Verify `.env` file exists in `easyread/backend/`
-- Check that `OPENAI_API_KEY` is set correctly
-- Restart the backend server after updating `.env`
-
-**Database errors:**
-- Delete `easyread/backend/easyread.db` and restart server (will recreate)
-
-### Mobile App Issues
-
-**Web app not opening:**
-- Manually open `http://localhost:8081` or `http://localhost:19006` in browser
-- Or press `w` again in the Expo terminal
-
-**Cannot connect to backend:**
-- Verify backend is running on port 4000
-- Check `EXPO_PUBLIC_BACKEND_URL` / `EXPO_PUBLIC_USE_LOCAL_BACKEND` in `mobile/.env` (see `backendResolution.js`)
-- For physical device, ensure Mac and phone are on same network
-
-**Missing dependencies:**
-```bash
-cd easyread/mobile
-npm install
-npx expo install expo-asset expo-linear-gradient
-```
-
-**Android SDK not found:**
-- Install Android Studio
-- Set `ANDROID_HOME` environment variable (see Option 3 above)
-
-## Features
-
-- **Document Import**: Upload PDFs, take photos, or paste text
-- **EasyRead Conversion**: Automatically converts documents to EasyRead format
-- **Chunked Reading**: Documents are split into manageable chunks
-- **Previous Files**: View and manage previously processed documents
-- **Settings**: Adjust text size and language (English/Spanish)
-- **Bilingual Support**: Full UI in English and Spanish
-
-## API Endpoints
-
-- `GET /documents` - List all documents
-- `GET /documents/:docId` - Get document details
-- `GET /documents/:docId/chunks/:i` - Get specific chunk
-- `POST /documents` - Upload/create document
-- `DELETE /documents` - Delete all documents
-- `DELETE /documents/:docId` - Delete specific document
-
-## Development Notes
-
-- Backend uses SQLite database (`easyread.db`)
-- EasyRead translations are generated using OpenAI GPT-4o
-- All EasyRead translations are stored in the database
-- Background processing generates EasyRead for all chunks automatically
-
-## Troubleshooting
-
-If you encounter issues:
-
-1. **Check backend logs** in Terminal 1 for errors
-2. **Check mobile app logs** in Terminal 2 or browser console
-3. **Verify environment variables** are set correctly
-4. **Restart both servers** after making changes
-5. **Clear cache** if needed:
-   ```bash
-   cd easyread/mobile
-   npx expo start -c
-   ```
-
-## Support
-
-For issues or questions, check:
-- Backend terminal for server errors
-- Browser console (F12) for web app errors
-- Expo terminal for mobile app errors
+**Input formats:** PDF upload, multi-page camera scan (up to 24 pages), direct text input  
+**Output:** Simplified EasyRead summaries (Spanish) with key terms, original text preserved, text-to-speech
 
 ---
 
-**Happy coding! 🚀**
+## Local Development Setup
+
+### Prerequisites
+
+- Node.js 20 or 22
+- Docker Desktop (for local PostgreSQL)
+- OpenAI API key — [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+- AWS account (free tier) — for Cognito authentication
+
+### 1. Start PostgreSQL with Docker
+
+```bash
+docker run --name clarodoc-pg \
+  -e POSTGRES_DB=disabilityapp \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=localpassword \
+  -p 5432:5432 \
+  -d postgres:15
+```
+
+To stop/start after initial setup:
+```bash
+docker stop clarodoc-pg
+docker start clarodoc-pg
+```
+
+### 2. Create AWS Cognito User Pool
+
+1. Go to AWS Console → Cognito → **Add sign-in and sign-up experiences**
+2. Select **Mobile app**
+3. AWS creates a User Pool and App Client automatically
+4. Note down **User Pool ID** and **App Client ID** (no client secret — required for mobile)
+
+### 3. Backend Setup
+
+```bash
+cd backend
+npm install
+```
+
+Create `backend/.env`:
+```env
+NODE_ENV=development
+PORT=4000
+OPENAI_API_KEY=your-openai-key
+
+COGNITO_USER_POOL_ID=us-east-2_XXXXXXXXX
+COGNITO_CLIENT_ID=XXXXXXXXXXXXXXXXXXXXXXXXXX
+
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=disabilityapp
+DB_USER=postgres
+DB_PASSWORD=localpassword
+```
+
+Start the backend:
+```bash
+npm run dev
+```
+
+The server connects to PostgreSQL on startup and creates the `documents` and `chunks` tables automatically.
+
+### 4. Mobile App Setup
+
+```bash
+cd mobile
+npm install
+```
+
+Create `mobile/.env`:
+```env
+EXPO_PUBLIC_BACKEND_URL=http://localhost:4000
+EXPO_PUBLIC_COGNITO_USER_POOL_ID=us-east-2_XXXXXXXXX
+EXPO_PUBLIC_COGNITO_CLIENT_ID=XXXXXXXXXXXXXXXXXXXXXXXXXX
+```
+
+For a **physical device** on the same Wi-Fi, replace `localhost` with your Mac's LAN IP:
+```bash
+ipconfig getifaddr en0
+# e.g. EXPO_PUBLIC_BACKEND_URL=http://192.168.1.42:4000
+```
+
+Start the mobile app:
+```bash
+npm run start:clean   # clears Metro cache, required after .env changes
+```
+
+Then press `w` for web browser, `i` for iOS simulator, or scan the QR code with Expo Go.
+
+---
+
+## Running
+
+| Terminal | Command |
+|---|---|
+| 1 — Backend | `cd backend && npm run dev` |
+| 2 — Mobile | `cd mobile && npm run start:clean` |
+
+After restarting your machine:
+```bash
+docker start clarodoc-pg   # restart PostgreSQL first
+```
+
+---
+
+## Database
+
+Documents and chunks are stored in PostgreSQL. To inspect:
+
+```bash
+# Connect to local DB
+docker exec -it clarodoc-pg psql -U postgres -d disabilityapp
+
+# Useful queries
+SELECT doc_id, title, created_at FROM documents;
+SELECT doc_id, chunk_index, heading FROM chunks;
+\q
+```
+
+**`documents` table** — one row per uploaded document, scoped to `user_id` (Cognito sub)  
+**`chunks` table** — one row per chunk; `easyread_json` is null until first read, then permanently stored
+
+---
+
+## API Endpoints
+
+All endpoints except `/health` require `Authorization: Bearer <cognito_access_token>`.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Health check (no auth) |
+| `GET` | `/documents` | List authenticated user's documents |
+| `POST` | `/documents` | Upload document (JSON text, PDF, or images) |
+| `GET` | `/documents/:docId/chunks/:i` | Fetch chunk; generates EasyRead on first access |
+| `DELETE` | `/documents/:docId` | Delete document and all its chunks |
+
+---
+
+## Authentication
+
+The app uses **AWS Cognito** for email/password authentication. Users must sign up and verify their email before accessing the app. Tokens are stored securely on-device (SecureStore on native, AsyncStorage on web) and automatically refreshed.
+
+Auth screens: Login → Sign Up → Email verification → App  
+Password reset: Login → Forgot Password → Email code → New password
+
+---
+
+## Features
+
+- **Authentication** — Sign up, sign in, forgot password via AWS Cognito
+- **Document Import** — PDF upload, multi-page camera scan, direct text input
+- **EasyRead Conversion** — GPT-4o simplifies text into short sentences with key terms
+- **Cloud Sync** — Documents stored in PostgreSQL, accessible across devices after login
+- **Offline Cache** — Processed chunks cached locally for offline reading
+- **Previous Files** — Full document history per user account
+- **Text-to-Speech** — Read EasyRead content aloud
+- **Bilingual UI** — Full English and Spanish interface
+- **Accessibility** — Adjustable text size (small / medium / large / x-large), light/dark theme
+
+---
+
+## Production Deployment (AWS)
+
+| Service | Purpose |
+|---|---|
+| AWS Cognito | User authentication |
+| AWS App Runner | Backend hosting (auto-scaling, 0.5 vCPU / 1 GB RAM) |
+| Amazon RDS PostgreSQL | Persistent database (`db.t3.small`) |
+| AWS Secrets Manager | OpenAI key and DB credentials |
+| EAS Build | Mobile app builds for iOS and Android |
+
+Update `mobile/eas.json` with your App Runner URL and Cognito IDs before building for production. Set all env vars as App Runner environment variables pointing to RDS instead of localhost.
+
+---
+
+## Common Issues
+
+**Port 4000 already in use:**
+```bash
+kill -9 $(lsof -ti:4000)
+```
+
+**Documents not saving to database:**
+- Ensure `EXPO_PUBLIC_BACKEND_URL` is explicitly set in `mobile/.env` (not just `EXPO_PUBLIC_USE_LOCAL_BACKEND`)
+- Restart Expo with `npm run start:clean` after any `.env` change
+
+**PDF upload fails:**
+- Scanned/image-based PDFs are not supported — use camera scan mode instead
+- Text-based PDFs must contain at least 200 characters of extractable text
+
+**Cannot connect to backend on physical device:**
+- Use your Mac's LAN IP (`ipconfig getifaddr en0`), not `localhost`
+- Mac and phone must be on the same Wi-Fi network
