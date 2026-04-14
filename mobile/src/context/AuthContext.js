@@ -123,6 +123,28 @@ export function AuthProvider({ children }) {
     setAccessToken(null);
   }, []);
 
+  const requestPasswordReset = useCallback(async (email) => {
+    const resp = await fetch(`${BACKEND_URL}/auth/forgot-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data?.error || "Failed to send reset code.");
+    return data;
+  }, []);
+
+  const resetPassword = useCallback(async (email, code, newPassword) => {
+    const resp = await fetch(`${BACKEND_URL}/auth/reset-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, code, newPassword }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data?.error || "Password reset failed.");
+    return data;
+  }, []);
+
   return (
     <AuthContext.Provider
       value={{
@@ -133,6 +155,8 @@ export function AuthProvider({ children }) {
         signIn,
         signUp,
         signOut,
+        requestPasswordReset,
+        resetPassword,
       }}
     >
       {children}
