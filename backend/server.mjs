@@ -7,6 +7,8 @@ import crypto from "crypto";
 import path from "path";
 import { fileURLToPath } from "url";
 import rateLimit from "express-rate-limit";
+import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken";
 
 import {
   removeHeadersFooters,
@@ -118,6 +120,70 @@ function mimeFromFilename(name) {
 
 app.get("/health", (req, res) => {
   res.json({ ok: true });
+});
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
+
+app.post("/auth/register", async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || typeof email !== "string" || !email.includes("@")) {
+      return res.status(400).json({ error: "Valid email is required." });
+    }
+    if (!password || typeof password !== "string" || password.length < 8) {
+      return res.status(400).json({ error: "Password must be at least 8 characters." });
+    }
+
+    const existing = await dbGet(`SELECT user_id FROM users WHERE email = $1`, [email.toLowerCase()]);
+    if (existing) {
+      return res.status(409).json({ error: "An account with this email already exists." });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    const userId = crypto.randomUUID();
+    await dbRun(
+      `INSERT INTO users (user_id, email, password_hash) VALUES ($1, $2, $3)`,
+      [userId, email.toLowerCase(), passwordHash]
+    );
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("POST /auth/register error:", err);
+    res.status(500).json({ error: "Registration failed. Please try again." });
+  }
+});
+
+app.post("/auth/login", async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required." });
+    }
+
+    const user = await dbGet(
+      `SELECT user_id, password_hash FROM users WHERE email = $1`,
+      [email.toLowerCase()]
+    );
+    if (!user) {
+      return res.status(401).json({ error: "Incorrect email or password." });
+    }
+
+    const match = await bcrypt.compare(password, user.password_hash);
+    if (!match) {
+      return res.status(401).json({ error: "Incorrect email or password." });
+    }
+
+    const accessToken = jwt.sign(
+      { sub: user.user_id, email: email.toLowerCase() },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    res.json({ accessToken, email: email.toLowerCase() });
+  } catch (err) {
+    console.error("POST /auth/login error:", err);
+    res.status(500).json({ error: "Login failed. Please try again." });
+  }
 });
 
 if (process.env.ALLOW_DIAGNOSTICS === "true") {

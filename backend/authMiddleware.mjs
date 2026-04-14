@@ -1,20 +1,14 @@
-import { CognitoJwtVerifier } from "aws-jwt-verify";
+import jwt from "jsonwebtoken";
 
-const verifier = CognitoJwtVerifier.create({
-  userPoolId: process.env.COGNITO_USER_POOL_ID,
-  clientId: process.env.COGNITO_CLIENT_ID,
-  tokenUse: "access",
-});
-
-export async function requireAuth(req, res, next) {
-  const authHeader = req.headers["authorization"];
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+export function requireAuth(req, res, next) {
+  const authHeader = req.headers["authorization"] || "";
+  if (!authHeader.startsWith("Bearer ")) {
     return res.status(401).json({ error: "Missing or invalid Authorization header." });
   }
 
   const token = authHeader.slice(7);
   try {
-    const payload = await verifier.verify(token);
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
     req.userId = payload.sub;
     next();
   } catch {
