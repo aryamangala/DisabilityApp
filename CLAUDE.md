@@ -50,6 +50,7 @@ eas submit --platform android
 - `CORS_ORIGIN` — comma-separated allowed origins
 - `ALLOW_DIAGNOSTICS` — enables `/test-openai` diagnostic endpoint
 - `JWT_SECRET` — required; generate with `openssl rand -hex 32`
+- `GMAIL_USER`, `GMAIL_APP_PASSWORD` — Gmail address + App Password for password reset emails (requires Gmail 2-Step Verification; create App Password at myaccount.google.com/apppasswords)
 - `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` — PostgreSQL connection (local Docker or RDS)
 
 **Mobile** — create `mobile/.env`:
@@ -75,6 +76,8 @@ Production target: AWS App Runner (backend) + Amazon RDS PostgreSQL (database). 
 - `GET /health` — health check (no auth)
 - `POST /auth/register` — create account; hashes password with bcrypt, stores in `users` table
 - `POST /auth/login` — verify password, return signed JWT (`{ accessToken, email }`)
+- `POST /auth/forgot-password` — generate 6-digit reset code, bcrypt-hash and store with 15-min expiry, send via Gmail SMTP
+- `POST /auth/reset-password` — verify code with bcrypt.compare, check expiry, update password_hash, clear reset fields
 - `GET /documents` — list authenticated user's documents
 - `POST /documents` — upload document (JSON text, PDF, or images)
 - `GET /documents/:docId/chunks/:i` — fetch chunk; generates EasyRead on first access, then caches to DB
@@ -102,7 +105,7 @@ Production target: AWS App Runner (backend) + Amazon RDS PostgreSQL (database). 
 - `PreviousFilesScreen` — browse documents (fetched from backend, falls back to AsyncStorage cache)
 - `SettingsScreen` — text size, language, theme, account (email + sign out)
 
-**Authentication** (`src/context/AuthContext.js`): Custom JWT sign-in/sign-up/sign-out via `fetch()` to `/auth/login` and `/auth/register`. Tokens stored under key `app_access_token` in `expo-secure-store` on native, `AsyncStorage` on web. Access token sent as `Authorization: Bearer` header on all API calls. Session restored on app launch by reading stored token and checking JWT `exp` claim locally.
+**Authentication** (`src/context/AuthContext.js`): Custom JWT sign-in/sign-up/sign-out/password-reset via `fetch()` to the `/auth/*` backend routes. Tokens stored under key `app_access_token` in `expo-secure-store` on native, `AsyncStorage` on web. Access token sent as `Authorization: Bearer` header on all API calls. Session restored on app launch by reading stored token and checking JWT `exp` claim locally. Password reset uses `requestPasswordReset(email)` + `resetPassword(email, code, newPassword)` — both exposed from the context.
 
 **State Management** (`src/context/`):
 - `DocumentContext` — current docId, chunkCount, chunks cache, document history; `refreshDocIndex` calls API first then falls back to AsyncStorage; `deleteLocalDocument` calls DELETE API before clearing local cache
