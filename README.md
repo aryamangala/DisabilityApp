@@ -57,6 +57,10 @@ OPENAI_API_KEY=your-openai-key
 
 JWT_SECRET=your-secret-here
 
+# Gmail SMTP — required for password reset emails
+GMAIL_USER=your-gmail@gmail.com
+GMAIL_APP_PASSWORD=your-16-char-app-password
+
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=disabilityapp
@@ -68,6 +72,11 @@ Generate a secure `JWT_SECRET`:
 ```bash
 openssl rand -hex 32
 ```
+
+**Gmail App Password setup** (required for password reset):
+1. Enable 2-Step Verification on your Google Account: myaccount.google.com → Security → 2-Step Verification
+2. Create an App Password: myaccount.google.com/apppasswords → App name: `ClaroDoc` → copy the 16-character password
+3. Set `GMAIL_USER` to your Gmail address and `GMAIL_APP_PASSWORD` to the copied password (no spaces)
 
 Start the backend:
 ```bash
@@ -132,7 +141,7 @@ SELECT doc_id, chunk_index, heading FROM chunks;
 \q
 ```
 
-**`users` table** — one row per registered user; passwords stored as bcrypt hashes  
+**`users` table** — one row per registered user; passwords stored as bcrypt hashes; `reset_token` (bcrypt-hashed code) and `reset_expires_at` used for password reset flow  
 **`documents` table** — one row per uploaded document, scoped to `user_id`  
 **`chunks` table** — one row per chunk; `easyread_json` is null until first read, then permanently stored
 
@@ -147,6 +156,8 @@ All endpoints except `/health`, `/auth/register`, and `/auth/login` require `Aut
 | `GET` | `/health` | Health check (no auth) |
 | `POST` | `/auth/register` | Create account (email + password) |
 | `POST` | `/auth/login` | Sign in — returns `{ accessToken, email }` |
+| `POST` | `/auth/forgot-password` | Send 6-digit reset code to email (no auth) |
+| `POST` | `/auth/reset-password` | Verify code and set new password (no auth) |
 | `GET` | `/documents` | List authenticated user's documents |
 | `POST` | `/documents` | Upload document (JSON text, PDF, or images) |
 | `GET` | `/documents/:docId/chunks/:i` | Fetch chunk; generates EasyRead on first access |
@@ -159,7 +170,7 @@ All endpoints except `/health`, `/auth/register`, and `/auth/login` require `Aut
 The app uses **custom JWT authentication** — no external auth service required. Users register with email and password; passwords are hashed with bcrypt and stored in the `users` PostgreSQL table. On sign-in, a signed JWT (7-day expiry) is returned and stored securely on-device (SecureStore on native, AsyncStorage on web).
 
 Auth screens: Login → Sign Up → App  
-Password reset: not yet implemented
+**Password reset:** user taps "Forgot password" → enters email → receives a 6-digit code by email (valid 15 minutes) → enters code + new password → redirected to Login. Reset codes are bcrypt-hashed before storage; plaintext is never saved.
 
 ---
 
@@ -227,6 +238,8 @@ docker push \
 | `NODE_ENV` | `production` |
 | `OPENAI_API_KEY` | your OpenAI key |
 | `JWT_SECRET` | output of `openssl rand -hex 32` |
+| `GMAIL_USER` | Gmail address used to send reset emails |
+| `GMAIL_APP_PASSWORD` | 16-character Gmail App Password |
 | `DB_HOST` | your RDS endpoint |
 | `DB_PORT` | `5432` |
 | `DB_NAME` | `disabilityapp` |
