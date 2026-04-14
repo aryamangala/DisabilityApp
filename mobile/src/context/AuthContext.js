@@ -1,13 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { Platform } from "react-native";
-import {
-  CognitoUser,
-  CognitoUserPool,
-  CognitoUserAttribute,
-  AuthenticationDetails,
-  CognitoRefreshToken,
-} from "amazon-cognito-identity-js";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { BACKEND_URL } from "../constants";
 
 // expo-secure-store only works on native; fall back to AsyncStorage on web
 let SecureStore = null;
@@ -15,17 +9,8 @@ if (Platform.OS !== "web") {
   SecureStore = require("expo-secure-store");
 }
 
-const USER_POOL_ID = process.env.EXPO_PUBLIC_COGNITO_USER_POOL_ID;
-const CLIENT_ID = process.env.EXPO_PUBLIC_COGNITO_CLIENT_ID;
-
-const userPool = new CognitoUserPool({
-  UserPoolId: USER_POOL_ID,
-  ClientId: CLIENT_ID,
-});
-
-const SECURE_KEY_ACCESS = "cognito_access_token";
-const SECURE_KEY_REFRESH = "cognito_refresh_token";
-const SECURE_KEY_EMAIL = "cognito_email";
+const KEY_ACCESS = "app_access_token";
+const KEY_EMAIL = "app_email";
 
 // Storage abstraction: SecureStore on native, AsyncStorage on web
 const storage = {
@@ -52,18 +37,26 @@ const storage = {
   },
 };
 
+function isTokenExpired(token) {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    return payload.exp * 1000 < Date.now();
+  } catch {
+    return true;
+  }
+}
+
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(null);   // { email }
   const [accessToken, setAccessToken] = useState(null);
   const [restoring, setRestoring] = useState(true);
 
   async function _clearStorage() {
     await Promise.allSettled([
-      storage.remove(SECURE_KEY_ACCESS),
-      storage.remove(SECURE_KEY_REFRESH),
-      storage.remove(SECURE_KEY_EMAIL),
+      storage.remove(KEY_ACCESS),
+      storage.remove(KEY_EMAIL),
     ]);
   }
 
@@ -71,26 +64,13 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     (async () => {
       try {
-        const storedEmail = await storage.get(SECURE_KEY_EMAIL);
-        const storedRefresh = await storage.get(SECURE_KEY_REFRESH);
-
-        if (storedEmail && storedRefresh) {
-          const cognitoUser = new CognitoUser({ Username: storedEmail, Pool: userPool });
-          const refreshToken = new CognitoRefreshToken({ RefreshToken: storedRefresh });
-
-          await new Promise((resolve, reject) => {
-            cognitoUser.refreshSession(refreshToken, async (err, session) => {
-              if (err) {
-                reject(err);
-              } else {
-                const newAccess = session.getAccessToken().getJwtToken();
-                setUser(cognitoUser);
-                setAccessToken(newAccess);
-                await storage.set(SECURE_KEY_ACCESS, newAccess).catch(() => {});
-                resolve();
-              }
-            });
-          });
+        const storedToken = await storage.get(KEY_ACCESS);
+        const storedEmail = await storage.get(KEY_EMAIL);
+        if (storedToken && storedEmail && !isTokenExpired(storedToken)) {
+          setUser({ email: storedEmail });
+          setAccessToken(storedToken);
+        } else {
+          await _clearStorage();
         }
       } catch {
         await _clearStorage();
@@ -100,96 +80,48 @@ export function AuthProvider({ children }) {
     })();
   }, []);
 
-  const signIn = useCallback((email, password) => {
-    return new Promise((resolve, reject) => {
-      const cognitoUser = new CognitoUser({ Username: email, Pool: userPool });
-      const authDetails = new AuthenticationDetails({ Username: email, Password: password });
-
-      cognitoUser.authenticateUser(authDetails, {
-        onSuccess: async (session) => {
-          const access = session.getAccessToken().getJwtToken();
-          const refresh = session.getRefreshToken().getToken();
-          await Promise.all([
-            storage.set(SECURE_KEY_ACCESS, access),
-            storage.set(SECURE_KEY_REFRESH, refresh),
-            storage.set(SECURE_KEY_EMAIL, email),
-          ]);
-          setUser(cognitoUser);
-          setAccessToken(access);
-          resolve(session);
-        },
-        onFailure: (err) => reject(err),
-      });
+  const signIn = useCallback(async (email, password) => {
+    const resp = await fetch(`${BACKEND_URL}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
     });
+    const data = await resp.json();
+    if (!resp.ok) {
+      const err = new Error(data?.error || "Login failed.");
+      err.code = "NotAuthorizedException";
+      throw err;
+    }
+    await Promise.all([
+      storage.set(KEY_ACCESS, data.accessToken),
+      storage.set(KEY_EMAIL, data.email),
+    ]);
+    setUser({ email: data.email });
+    setAccessToken(data.accessToken);
+    return data;
   }, []);
 
-  const signUp = useCallback((email, password) => {
-    return new Promise((resolve, reject) => {
-      const attributes = [
-        new CognitoUserAttribute({ Name: "email", Value: email }),
-      ];
-      userPool.signUp(email, password, attributes, null, (err, result) => {
-        if (err) reject(err);
-        else resolve(result);
-      });
+  const signUp = useCallback(async (email, password) => {
+    const resp = await fetch(`${BACKEND_URL}/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
     });
-  }, []);
-
-  const confirmSignUp = useCallback((email, code) => {
-    return new Promise((resolve, reject) => {
-      const cognitoUser = new CognitoUser({ Username: email, Pool: userPool });
-      cognitoUser.confirmRegistration(code, true, (err, result) => {
-        if (err) reject(err);
-        else resolve(result);
-      });
-    });
-  }, []);
-
-  const forgotPassword = useCallback((email) => {
-    return new Promise((resolve, reject) => {
-      const cognitoUser = new CognitoUser({ Username: email, Pool: userPool });
-      cognitoUser.forgotPassword({
-        onSuccess: resolve,
-        onFailure: reject,
-      });
-    });
-  }, []);
-
-  const confirmForgotPassword = useCallback((email, code, newPassword) => {
-    return new Promise((resolve, reject) => {
-      const cognitoUser = new CognitoUser({ Username: email, Pool: userPool });
-      cognitoUser.confirmPassword(code, newPassword, {
-        onSuccess: resolve,
-        onFailure: reject,
-      });
-    });
-  }, []);
-
-  const getValidToken = useCallback(async () => {
-    if (!user) return null;
-    return new Promise((resolve, reject) => {
-      user.getSession(async (err, session) => {
-        if (err) {
-          await _clearStorage();
-          setUser(null);
-          setAccessToken(null);
-          reject(err);
-          return;
-        }
-        const token = session.getAccessToken().getJwtToken();
-        setAccessToken(token);
-        await storage.set(SECURE_KEY_ACCESS, token).catch(() => {});
-        resolve(token);
-      });
-    });
-  }, [user]);
+    const data = await resp.json();
+    if (!resp.ok) {
+      const err = new Error(data?.error || "Registration failed.");
+      if (resp.status === 409) err.code = "UsernameExistsException";
+      throw err;
+    }
+    // Auto sign in after registration
+    return signIn(email, password);
+  }, [signIn]);
 
   const signOut = useCallback(async () => {
-    if (user) user.signOut();
     await _clearStorage();
     setUser(null);
     setAccessToken(null);
-  }, [user]);
+  }, []);
 
   return (
     <AuthContext.Provider
@@ -200,10 +132,6 @@ export function AuthProvider({ children }) {
         restoring,
         signIn,
         signUp,
-        confirmSignUp,
-        forgotPassword,
-        confirmForgotPassword,
-        getValidToken,
         signOut,
       }}
     >

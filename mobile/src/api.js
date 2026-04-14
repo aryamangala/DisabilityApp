@@ -38,9 +38,9 @@ async function getAuthHeader() {
   try {
     let token;
     if (SecureStore) {
-      token = await SecureStore.getItemAsync("cognito_access_token");
+      token = await SecureStore.getItemAsync("app_access_token");
     } else {
-      token = await AsyncStorage.getItem("cognito_access_token");
+      token = await AsyncStorage.getItem("app_access_token");
     }
     return token ? { Authorization: `Bearer ${token}` } : {};
   } catch {
