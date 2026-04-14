@@ -49,26 +49,40 @@ eas submit --platform android
 - `LOG_VERBOSE` — enables verbose logging
 - `CORS_ORIGIN` — comma-separated allowed origins
 - `ALLOW_DIAGNOSTICS` — enables `/test-openai` diagnostic endpoint
+- `JWT_SECRET` — required; generate with `openssl rand -hex 32`
+- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` — PostgreSQL connection (local Docker or RDS)
 
 **Mobile** — create `mobile/.env`:
-- `EXPO_PUBLIC_BACKEND_URL` — production HTTPS backend URL
-- `EXPO_PUBLIC_USE_LOCAL_BACKEND` — set `true` to use local backend (iOS: `127.0.0.1:4000`, Android: `10.0.2.2:4000`)
+- `EXPO_PUBLIC_BACKEND_URL` — set explicitly to backend URL (local: `http://localhost:4000`, production: App Runner HTTPS URL)
 - `EAS_PROJECT_ID` — for EAS Build
 
-For physical device testing with local backend, set `EXPO_PUBLIC_BACKEND_URL` to your machine's LAN IP (`ipconfig getifaddr en0` on Mac).
+For physical device testing with local backend, set `EXPO_PUBLIC_BACKEND_URL` to your machine's LAN IP (`ipconfig getifaddr en0` on Mac). Always run `npm run start:clean` after any `.env` change.
 
-Production backend is deployed on Railway at `https://disabilityapp-production.up.railway.app`.
+Local PostgreSQL via Docker:
+```bash
+docker start clarodoc-pg   # start existing container
+docker run --name clarodoc-pg -e POSTGRES_DB=disabilityapp -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=localpassword -p 5432:5432 -d postgres:15   # first-time setup
+```
+
+Production target: AWS App Runner (backend) + Amazon RDS PostgreSQL (database). See README for full deployment steps.
 
 ## Architecture
 
 ### Backend (`backend/server.mjs`)
 
-**API Endpoints:**
-- `POST /documents` — upload document (text, PDF, or base64 images for camera scans)
-- `GET /documents/:docId/chunks/:i` — fetch a specific chunk with its EasyRead translation
-- `GET /health` — health check
+**API Endpoints** (auth endpoints are public; all others require `Authorization: Bearer <access_token>`):
+- `GET /health` — health check (no auth)
+- `POST /auth/register` — create account; hashes password with bcrypt, stores in `users` table
+- `POST /auth/login` — verify password, return signed JWT (`{ accessToken, email }`)
+- `GET /documents` — list authenticated user's documents
+- `POST /documents` — upload document (JSON text, PDF, or images)
+- `GET /documents/:docId/chunks/:i` — fetch chunk; generates EasyRead on first access, then caches to DB
+- `DELETE /documents/:docId` — delete document and all its chunks
 
-**Document Storage:** Ephemeral, in-memory only with 1-hour TTL. No user content is persisted to disk/DB.
+**Authentication:** `authMiddleware.mjs` uses `jsonwebtoken.verify()` with `JWT_SECRET` env var; attaches `req.userId = payload.sub` (UUID from `users` table) to all protected requests. Passwords hashed with bcrypt (saltRounds: 12).
+
+**Document Storage:** Persistent PostgreSQL via `db.mjs` (pg Pool). Tables are created automatically by `initDb()` on startup. SSL is enabled automatically when `NODE_ENV=production`.
 
 **Text Processing Pipeline (`textUtils.mjs`):**
 1. Remove headers/footers (checks first/last 20 lines)
@@ -83,18 +97,20 @@ Production backend is deployed on Railway at `https://disabilityapp-production.u
 
 ### Mobile (`mobile/`)
 
-**Navigation** (`App.js`): Stack navigator with 7 screens:
+**Navigation** (`App.js`): Dual-stack navigator — `AuthNavigator` (Login, SignUp, ForgotPassword) shown when unauthenticated; `AppNavigator` shown when authenticated:
 - `LandingScreen` → `ImportScreen` → `ProcessingScreen` → `ReaderScreen` → `DoneScreen`
-- `PreviousFilesScreen` — browse cached documents
-- `SettingsScreen` — text size, language, theme
+- `PreviousFilesScreen` — browse documents (fetched from backend, falls back to AsyncStorage cache)
+- `SettingsScreen` — text size, language, theme, account (email + sign out)
+
+**Authentication** (`src/context/AuthContext.js`): Custom JWT sign-in/sign-up/sign-out via `fetch()` to `/auth/login` and `/auth/register`. Tokens stored under key `app_access_token` in `expo-secure-store` on native, `AsyncStorage` on web. Access token sent as `Authorization: Bearer` header on all API calls. Session restored on app launch by reading stored token and checking JWT `exp` claim locally.
 
 **State Management** (`src/context/`):
-- `DocumentContext` — current docId, chunkCount, chunks cache, document history (all persisted to AsyncStorage)
+- `DocumentContext` — current docId, chunkCount, chunks cache, document history; `refreshDocIndex` calls API first then falls back to AsyncStorage; `deleteLocalDocument` calls DELETE API before clearing local cache
 - `SettingsContext` — textSize (small/medium/large/xlarge), language (en/es), theme (light/dark)
 
-**API Client** (`src/api.js`): All backend calls go through here; handles URL resolution and error formatting.
+**API Client** (`src/api.js`): All backend calls go through here; handles URL resolution, auth headers (Platform-aware: SecureStore on native, AsyncStorage on web), and error formatting.
 
-**Backend URL Resolution** (`app.config.js`): Checks `EXPO_PUBLIC_USE_LOCAL_BACKEND` → env URL → `defaultPublicBackend.json` fallback.
+**Backend URL Resolution** (`app.config.js`): Checks `EXPO_PUBLIC_BACKEND_URL` env var → `defaultPublicBackend.json` fallback. Always use explicit `EXPO_PUBLIC_BACKEND_URL`; `EXPO_PUBLIC_USE_LOCAL_BACKEND` is unreliable.
 
 **Key Features:**
 - Multi-page camera scanning (up to 24 pages), PDF upload, direct text input
@@ -104,7 +120,10 @@ Production backend is deployed on Railway at `https://disabilityapp-production.u
 
 ## Key Patterns
 
-- **Backend uses ES modules** (`"type": "module"` in `backend/package.json`) — use `import`/`export`, not `require`/`module.exports`
-- **Mobile env vars** prefixed with `EXPO_PUBLIC_` are embedded in the app bundle and visible to users — never put secrets there
-- **Chunked reading**: ReaderScreen fetches chunks on-demand (not all at once); chunks are cached in DocumentContext after first fetch
+- **Backend uses ES modules** (`"type": "module"` in `backend/package.json`) — use `import`/`export`, not `require`/`module.exports`; undeclared variable assignments throw `ReferenceError` in strict mode
+- **Mobile env vars** prefixed with `EXPO_PUBLIC_` are embedded in the app bundle at Metro bundle time — never put secrets there; always run `npm run start:clean` after `.env` changes
+- **Platform-aware storage**: `expo-secure-store` does not support web — always guard with `Platform.OS !== "web"` and fall back to `AsyncStorage`
+- **Chunked reading**: ReaderScreen fetches chunks on-demand (not all at once); chunks are cached in DocumentContext after first fetch; EasyRead is generated once and permanently stored in `chunks.easyread_json`
 - **Language**: EasyRead output is currently forced to Spanish by the prompt in `openaiClient.mjs`; UI language is controlled separately by SettingsContext
+- **Database**: `users` table stores accounts; `documents` table scoped to `user_id` (UUID from `users`); `chunks` table has `ON DELETE CASCADE` — deleting a document removes all its chunks automatically
+- **JWT tokens**: 7-day expiry, HS256, signed with `JWT_SECRET`; no refresh token — user re-logs in when expired; expiry checked client-side by decoding the JWT payload (no library needed)

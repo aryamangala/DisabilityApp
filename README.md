@@ -6,7 +6,7 @@ An app that converts complex legal and medical documents into EasyRead format fo
 
 ```
 Mobile App (Expo React Native)
-  └── AWS Cognito          — email/password authentication
+  └── Custom JWT Auth      — email/password authentication (self-contained, no external auth service)
   └── Backend API          — Node.js/Express
         └── PostgreSQL     — persistent document + chunk storage (RDS in production, Docker locally)
         └── OpenAI GPT-4o  — OCR and EasyRead generation
@@ -24,7 +24,6 @@ Mobile App (Expo React Native)
 - Node.js 20 or 22
 - Docker Desktop (for local PostgreSQL)
 - OpenAI API key — [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
-- AWS account (free tier) — for Cognito authentication
 
 ### 1. Start PostgreSQL with Docker
 
@@ -43,14 +42,7 @@ docker stop clarodoc-pg
 docker start clarodoc-pg
 ```
 
-### 2. Create AWS Cognito User Pool
-
-1. Go to AWS Console → Cognito → **Add sign-in and sign-up experiences**
-2. Select **Mobile app**
-3. AWS creates a User Pool and App Client automatically
-4. Note down **User Pool ID** and **App Client ID** (no client secret — required for mobile)
-
-### 3. Backend Setup
+### 2. Backend Setup
 
 ```bash
 cd backend
@@ -63,8 +55,7 @@ NODE_ENV=development
 PORT=4000
 OPENAI_API_KEY=your-openai-key
 
-COGNITO_USER_POOL_ID=us-east-2_XXXXXXXXX
-COGNITO_CLIENT_ID=XXXXXXXXXXXXXXXXXXXXXXXXXX
+JWT_SECRET=your-secret-here
 
 DB_HOST=localhost
 DB_PORT=5432
@@ -73,14 +64,19 @@ DB_USER=postgres
 DB_PASSWORD=localpassword
 ```
 
+Generate a secure `JWT_SECRET`:
+```bash
+openssl rand -hex 32
+```
+
 Start the backend:
 ```bash
 npm run dev
 ```
 
-The server connects to PostgreSQL on startup and creates the `documents` and `chunks` tables automatically.
+The server connects to PostgreSQL on startup and creates the `users`, `documents`, and `chunks` tables automatically.
 
-### 4. Mobile App Setup
+### 3. Mobile App Setup
 
 ```bash
 cd mobile
@@ -90,8 +86,6 @@ npm install
 Create `mobile/.env`:
 ```env
 EXPO_PUBLIC_BACKEND_URL=http://localhost:4000
-EXPO_PUBLIC_COGNITO_USER_POOL_ID=us-east-2_XXXXXXXXX
-EXPO_PUBLIC_COGNITO_CLIENT_ID=XXXXXXXXXXXXXXXXXXXXXXXXXX
 ```
 
 For a **physical device** on the same Wi-Fi, replace `localhost` with your Mac's LAN IP:
@@ -132,23 +126,27 @@ Documents and chunks are stored in PostgreSQL. To inspect:
 docker exec -it clarodoc-pg psql -U postgres -d disabilityapp
 
 # Useful queries
+SELECT user_id, email, created_at FROM users;
 SELECT doc_id, title, created_at FROM documents;
 SELECT doc_id, chunk_index, heading FROM chunks;
 \q
 ```
 
-**`documents` table** — one row per uploaded document, scoped to `user_id` (Cognito sub)  
+**`users` table** — one row per registered user; passwords stored as bcrypt hashes  
+**`documents` table** — one row per uploaded document, scoped to `user_id`  
 **`chunks` table** — one row per chunk; `easyread_json` is null until first read, then permanently stored
 
 ---
 
 ## API Endpoints
 
-All endpoints except `/health` require `Authorization: Bearer <cognito_access_token>`.
+All endpoints except `/health`, `/auth/register`, and `/auth/login` require `Authorization: Bearer <access_token>`.
 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/health` | Health check (no auth) |
+| `POST` | `/auth/register` | Create account (email + password) |
+| `POST` | `/auth/login` | Sign in — returns `{ accessToken, email }` |
 | `GET` | `/documents` | List authenticated user's documents |
 | `POST` | `/documents` | Upload document (JSON text, PDF, or images) |
 | `GET` | `/documents/:docId/chunks/:i` | Fetch chunk; generates EasyRead on first access |
@@ -158,16 +156,16 @@ All endpoints except `/health` require `Authorization: Bearer <cognito_access_to
 
 ## Authentication
 
-The app uses **AWS Cognito** for email/password authentication. Users must sign up and verify their email before accessing the app. Tokens are stored securely on-device (SecureStore on native, AsyncStorage on web) and automatically refreshed.
+The app uses **custom JWT authentication** — no external auth service required. Users register with email and password; passwords are hashed with bcrypt and stored in the `users` PostgreSQL table. On sign-in, a signed JWT (7-day expiry) is returned and stored securely on-device (SecureStore on native, AsyncStorage on web).
 
-Auth screens: Login → Sign Up → Email verification → App  
-Password reset: Login → Forgot Password → Email code → New password
+Auth screens: Login → Sign Up → App  
+Password reset: not yet implemented
 
 ---
 
 ## Features
 
-- **Authentication** — Sign up, sign in, forgot password via AWS Cognito
+- **Authentication** — Sign up and sign in with email/password (custom JWT, self-contained)
 - **Document Import** — PDF upload, multi-page camera scan, direct text input
 - **EasyRead Conversion** — GPT-4o simplifies text into short sentences with key terms
 - **Cloud Sync** — Documents stored in PostgreSQL, accessible across devices after login
@@ -183,10 +181,9 @@ Password reset: Login → Forgot Password → Email code → New password
 
 | Service | Purpose |
 |---|---|
-| AWS Cognito | User authentication (already configured) |
-| AWS App Runner | Backend hosting (auto-scaling, 0.5 vCPU / 1 GB RAM) |
-| Amazon RDS PostgreSQL | Persistent database (`db.t3.small`) |
-| AWS Secrets Manager | OpenAI key and DB credentials |
+| AWS App Runner | Backend hosting (auto-scaling, 1 vCPU / 2 GB RAM) |
+| Amazon RDS PostgreSQL | Persistent database (`db.t3.micro`) |
+| AWS Secrets Manager | OpenAI key, JWT secret, and DB credentials |
 | EAS Build | Mobile app builds for iOS and Android |
 
 ### Step 1: Create RDS PostgreSQL
@@ -222,15 +219,14 @@ docker push \
 1. AWS Console → **App Runner** → **Create service**
 2. Source: **Container registry → Amazon ECR** → select `clarodoc-backend`
 3. Deployment trigger: **Automatic**
-4. Port: **4000**, CPU: **0.5 vCPU**, Memory: **1 GB**
+4. Port: **4000**, CPU: **1 vCPU**, Memory: **2 GB**
 5. Add environment variables:
 
 | Key | Value |
 |---|---|
 | `NODE_ENV` | `production` |
 | `OPENAI_API_KEY` | your OpenAI key |
-| `COGNITO_USER_POOL_ID` | `us-east-2_BkarfNjFA` |
-| `COGNITO_CLIENT_ID` | `539pi38rggbrpe1i2m7t2f7t32` |
+| `JWT_SECRET` | output of `openssl rand -hex 32` |
 | `DB_HOST` | your RDS endpoint |
 | `DB_PORT` | `5432` |
 | `DB_NAME` | `disabilityapp` |
@@ -275,7 +271,7 @@ kill -9 $(lsof -ti:4000)
 ```
 
 **Documents not saving to database:**
-- Ensure `EXPO_PUBLIC_BACKEND_URL` is explicitly set in `mobile/.env` (not just `EXPO_PUBLIC_USE_LOCAL_BACKEND`)
+- Ensure `EXPO_PUBLIC_BACKEND_URL` is explicitly set in `mobile/.env`
 - Restart Expo with `npm run start:clean` after any `.env` change
 
 **PDF upload fails:**

@@ -9,9 +9,7 @@
       "distribution": "internal",
       "channel": "development",
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://YOUR_APP_RUNNER_URL.awsapprunner.com",
-        "EXPO_PUBLIC_COGNITO_USER_POOL_ID": "us-east-1_XXXXXXXXX",
-        "EXPO_PUBLIC_COGNITO_CLIENT_ID": "XXXXXXXXXXXXXXXXXXXXXXXXXX"
+        "EXPO_PUBLIC_BACKEND_URL": "https://YOUR_APP_RUNNER_URL.awsapprunner.com"
       },
       "android": {
         "buildType": "apk"
@@ -24,9 +22,7 @@
       "distribution": "internal",
       "channel": "preview",
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://YOUR_APP_RUNNER_URL.awsapprunner.com",
-        "EXPO_PUBLIC_COGNITO_USER_POOL_ID": "us-east-1_XXXXXXXXX",
-        "EXPO_PUBLIC_COGNITO_CLIENT_ID": "XXXXXXXXXXXXXXXXXXXXXXXXXX"
+        "EXPO_PUBLIC_BACKEND_URL": "https://YOUR_APP_RUNNER_URL.awsapprunner.com"
       },
       "android": {
         "buildType": "app-bundle"
@@ -36,9 +32,7 @@
     "production": {
       "channel": "production",
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://YOUR_APP_RUNNER_URL.awsapprunner.com",
-        "EXPO_PUBLIC_COGNITO_USER_POOL_ID": "us-east-1_XXXXXXXXX",
-        "EXPO_PUBLIC_COGNITO_CLIENT_ID": "XXXXXXXXXXXXXXXXXXXXXXXXXX"
+        "EXPO_PUBLIC_BACKEND_URL": "https://YOUR_APP_RUNNER_URL.awsapprunner.com"
       },
       "android": {
         "buildType": "app-bundle"
