@@ -55,6 +55,9 @@ export async function initDb() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_expires_at TIMESTAMPTZ`);
 
+  // Add S3 key column to documents table (safe to run repeatedly)
+  await pool.query(`ALTER TABLE documents ADD COLUMN IF NOT EXISTS s3_key TEXT`);
+
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_documents_user_id ON documents (user_id)
   `);

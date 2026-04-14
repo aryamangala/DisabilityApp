@@ -10,6 +10,7 @@ import rateLimit from "express-rate-limit";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import nodemailer from "nodemailer";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 
 import {
   removeHeadersFooters,
@@ -26,6 +27,18 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 4000;
+
+const s3 = new S3Client({ region: process.env.AWS_REGION || "us-east-1" });
+
+async function uploadToS3(key, buffer, contentType) {
+  await s3.send(new PutObjectCommand({
+    Bucket: process.env.S3_BUCKET_NAME,
+    Key: key,
+    Body: buffer,
+    ContentType: contentType,
+  }));
+  return key;
+}
 
 // Railway / reverse proxy: correct client IP for logs and rate limits
 app.set("trust proxy", 1);
@@ -382,13 +395,28 @@ app.post(
       const docId = generateDocId();
       const safeTitle = title || extractedText.slice(0, 60).replace(/\n/g, " ").trim();
 
+      // Upload original file to S3 (best-effort — non-fatal if unavailable)
+      let s3Key = null;
+      if (process.env.S3_BUCKET_NAME) {
+        const uploadFile = req.files?.file?.[0] || req.files?.files?.[0];
+        if (uploadFile) {
+          try {
+            s3Key = `uploads/${req.userId}/${docId}/${uploadFile.originalname}`;
+            await uploadToS3(s3Key, uploadFile.buffer, uploadFile.mimetype);
+          } catch (err) {
+            console.error("S3 upload failed (non-fatal):", err.message);
+            s3Key = null;
+          }
+        }
+      }
+
       // Persist document and all chunks in a single transaction
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
         await client.query(
-          `INSERT INTO documents (doc_id, user_id, title, language) VALUES ($1, $2, $3, $4)`,
-          [docId, req.userId, safeTitle, language]
+          `INSERT INTO documents (doc_id, user_id, title, language, s3_key) VALUES ($1, $2, $3, $4, $5)`,
+          [docId, req.userId, safeTitle, language, s3Key]
         );
         for (let i = 0; i < chunks.length; i++) {
           await client.query(
