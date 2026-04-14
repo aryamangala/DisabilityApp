@@ -51,6 +51,10 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON chunks (doc_id)
   `);
 
+  // Add password reset columns to existing users table (safe to run repeatedly)
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token TEXT`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_expires_at TIMESTAMPTZ`);
+
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_documents_user_id ON documents (user_id)
   `);

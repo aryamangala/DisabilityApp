@@ -9,6 +9,7 @@ import { fileURLToPath } from "url";
 import rateLimit from "express-rate-limit";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import nodemailer from "nodemailer";
 
 import {
   removeHeadersFooters,
@@ -183,6 +184,87 @@ app.post("/auth/login", async (req, res) => {
   } catch (err) {
     console.error("POST /auth/login error:", err);
     res.status(500).json({ error: "Login failed. Please try again." });
+  }
+});
+
+app.post("/auth/forgot-password", async (req, res) => {
+  try {
+    const { email } = req.body || {};
+    if (!email || typeof email !== "string") {
+      return res.status(400).json({ error: "Email is required." });
+    }
+
+    const user = await dbGet(`SELECT user_id FROM users WHERE email = $1`, [email.toLowerCase()]);
+    // Always return ok to avoid leaking whether an account exists
+    if (!user) return res.json({ ok: true });
+
+    const code = crypto.randomInt(100000, 999999).toString();
+    const tokenHash = await bcrypt.hash(code, 10);
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+
+    await dbRun(
+      `UPDATE users SET reset_token = $1, reset_expires_at = $2 WHERE email = $3`,
+      [tokenHash, expiresAt.toISOString(), email.toLowerCase()]
+    );
+
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
+    });
+
+    await transporter.sendMail({
+      from: `"ClaroDoc" <${process.env.GMAIL_USER}>`,
+      to: email,
+      subject: "Your ClaroDoc password reset code",
+      text: `Your password reset code is: ${code}\n\nThis code expires in 15 minutes. If you did not request a reset, ignore this email.`,
+      html: `<p>Your ClaroDoc password reset code is:</p><h2>${code}</h2><p>This code expires in 15 minutes. If you did not request a reset, ignore this email.</p>`,
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("POST /auth/forgot-password error:", err);
+    res.status(500).json({ error: "Failed to send reset code. Please try again." });
+  }
+});
+
+app.post("/auth/reset-password", async (req, res) => {
+  try {
+    const { email, code, newPassword } = req.body || {};
+    if (!email || !code || !newPassword) {
+      return res.status(400).json({ error: "Email, code, and new password are required." });
+    }
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: "Password must be at least 8 characters." });
+    }
+
+    const user = await dbGet(
+      `SELECT reset_token, reset_expires_at FROM users WHERE email = $1`,
+      [email.toLowerCase()]
+    );
+
+    if (!user || !user.reset_token || !user.reset_expires_at) {
+      return res.status(400).json({ error: "No reset code found. Please request a new one." });
+    }
+
+    if (new Date(user.reset_expires_at) < new Date()) {
+      return res.status(400).json({ error: "Reset code has expired. Please request a new one." });
+    }
+
+    const match = await bcrypt.compare(code, user.reset_token);
+    if (!match) {
+      return res.status(400).json({ error: "Incorrect reset code." });
+    }
+
+    const newHash = await bcrypt.hash(newPassword, 12);
+    await dbRun(
+      `UPDATE users SET password_hash = $1, reset_token = NULL, reset_expires_at = NULL WHERE email = $2`,
+      [newHash, email.toLowerCase()]
+    );
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("POST /auth/reset-password error:", err);
+    res.status(500).json({ error: "Password reset failed. Please try again." });
   }
 });
 
