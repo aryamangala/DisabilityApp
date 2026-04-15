@@ -9,7 +9,7 @@
       "distribution": "internal",
       "channel": "development",
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "http://CLARA-DOC-ALB-1055369928.us-east-1.elb.amazonaws.com"
+        "EXPO_PUBLIC_BACKEND_URL": "http://CLARA-DOC-ALB-1055369928.us-east-1.elb.amazonaws.com:3000"
       },
       "android": {
         "buildType": "apk"
@@ -22,7 +22,7 @@
       "distribution": "internal",
       "channel": "preview",
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "http://CLARA-DOC-ALB-1055369928.us-east-1.elb.amazonaws.com"
+        "EXPO_PUBLIC_BACKEND_URL": "http://CLARA-DOC-ALB-1055369928.us-east-1.elb.amazonaws.com:3000"
       },
       "android": {
         "buildType": "app-bundle"
@@ -32,7 +32,7 @@
     "production": {
       "channel": "production",
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "http://CLARA-DOC-ALB-1055369928.us-east-1.elb.amazonaws.com"
+        "EXPO_PUBLIC_BACKEND_URL": "http://CLARA-DOC-ALB-1055369928.us-east-1.elb.amazonaws.com:3000"
       },
       "android": {
         "buildType": "app-bundle"
