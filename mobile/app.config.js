@@ -37,18 +37,24 @@ export default {
       bundleIdentifier: "com.easyread.app",
       supportsTablet: true,
       buildNumber: "1",
-      infoPlist: isDevClientProfile
-        ? {
-            NSLocalNetworkUsageDescription:
-              "ClaroDoc uses your local network in debug builds to load JavaScript from the development server on your Mac.",
-            NSBonjourServices: ["_expo-development-server._tcp"],
-          }
-        : {},
+      infoPlist: {
+        ...(isDevClientProfile
+          ? {
+              NSLocalNetworkUsageDescription:
+                "ClaroDoc uses your local network in debug builds to load JavaScript from the development server on your Mac.",
+              NSBonjourServices: ["_expo-development-server._tcp"],
+            }
+          : {}),
+        NSAppTransportSecurity: {
+          NSAllowsArbitraryLoads: true,
+        },
+      },
     },
     android: {
       package: "com.easyread.app",
       // Bump for every Play upload (or manage via EAS remote version if you prefer).
       versionCode: 1,
+      usesCleartextTraffic: true,
       // Microphone is not used (see expo-image-picker `microphonePermission: false`); strip if any dep merges it.
       blockedPermissions: ["android.permission.RECORD_AUDIO"],
       adaptiveIcon: {
