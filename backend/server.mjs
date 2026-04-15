@@ -395,18 +395,23 @@ app.post(
       const docId = generateDocId();
       const safeTitle = title || extractedText.slice(0, 60).replace(/\n/g, " ").trim();
 
-      // Upload original file to S3 (best-effort — non-fatal if unavailable)
+      // Upload original content to S3 (best-effort — non-fatal if unavailable)
       let s3Key = null;
       if (process.env.S3_BUCKET_NAME) {
         const uploadFile = req.files?.file?.[0] || req.files?.files?.[0];
-        if (uploadFile) {
-          try {
+        try {
+          if (uploadFile) {
+            // PDF or image — upload original file bytes
             s3Key = `uploads/${req.userId}/${docId}/${uploadFile.originalname}`;
             await uploadToS3(s3Key, uploadFile.buffer, uploadFile.mimetype);
-          } catch (err) {
-            console.error("S3 upload failed (non-fatal):", err.message);
-            s3Key = null;
+          } else if (extractedText) {
+            // Plain text input — upload as .txt file
+            s3Key = `uploads/${req.userId}/${docId}/input.txt`;
+            await uploadToS3(s3Key, Buffer.from(extractedText, "utf-8"), "text/plain");
           }
+        } catch (err) {
+          console.error("S3 upload failed (non-fatal):", err.message);
+          s3Key = null;
         }
       }
 
