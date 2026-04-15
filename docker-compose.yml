@@ -2,10 +2,11 @@ services:
   db:
     image: postgres:15
     restart: unless-stopped
+    env_file: ./backend/.env
     environment:
       POSTGRES_DB: ${DB_NAME:-disabilityapp}
       POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

@@ -62,4 +62,5 @@ temp/
 
 backend/.env
 backend/.env
+backend/ec2_.env
 backend/easyread.db
