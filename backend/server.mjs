@@ -420,8 +420,8 @@ app.post(
       try {
         await client.query("BEGIN");
         await client.query(
-          `INSERT INTO documents (doc_id, user_id, title, language, s3_key) VALUES ($1, $2, $3, $4, $5)`,
-          [docId, req.userId, safeTitle, language, s3Key]
+          `INSERT INTO documents (doc_id, user_id, title, language, s3_key, s3_bucket) VALUES ($1, $2, $3, $4, $5, $6)`,
+          [docId, req.userId, safeTitle, language, s3Key, s3Key ? process.env.S3_BUCKET_NAME : null]
         );
         for (let i = 0; i < chunks.length; i++) {
           await client.query(
