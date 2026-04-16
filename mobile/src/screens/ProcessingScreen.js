@@ -102,7 +102,7 @@ export default function ProcessingScreen() {
           );
         }
 
-        setStatus("Saving to device...");
+        setStatus("Loading...");
         setDocId(result.docId);
         setChunkCount(result.chunkCount);
         setCurrentChunkIndex(0);
@@ -117,7 +117,7 @@ export default function ProcessingScreen() {
         const chunks = [];
         for (let i = 0; i < result.chunkCount; i++) {
           if (cancelled) return;
-          setStatus(`Saving to device... (${i + 1}/${result.chunkCount})`);
+          setStatus(`Saving / Loading... (${i + 1}/${result.chunkCount})`);
           const data = await fetchChunk(result.docId, i);
           chunks.push(data);
           setChunkInCache(i, data);
