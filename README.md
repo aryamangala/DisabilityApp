@@ -1,31 +1,80 @@
-# ClaroDoc
+# ⚖ ClaroDoc
 
-An app that converts complex legal and medical documents into EasyRead format for individuals with intellectual disabilities, giving them greater autonomy over important documents.
+ClaroDoc converts complex legal and medical documents into **EasyRead format** for individuals with intellectual disabilities — giving them greater autonomy over the documents that affect their lives.
+
+Users upload a PDF, scan pages with their camera, or paste text. The backend extracts and chunks the content, then uses GPT-4o to generate simplified summaries with short sentences and key terms highlighted. Full English and Spanish support throughout.
+
+---
 
 ## Architecture
 
 ```
 Mobile App (Expo React Native)
-  └── Custom JWT Auth      — email/password authentication (self-contained, no external auth service)
-  └── Backend API          — Node.js/Express
-        └── PostgreSQL     — persistent document + chunk storage (RDS in production, Docker locally)
-        └── OpenAI GPT-4o  — OCR and EasyRead generation
+  └── Custom JWT Auth         — email/password, no external auth service
+  └── Backend API             — Node.js/Express (Docker on EC2)
+        └── PostgreSQL        — persistent document + chunk storage
+        └── OpenAI GPT-4o     — OCR and EasyRead generation
+        └── AWS S3            — original file storage (PDF, images, text)
 ```
 
-**Input formats:** PDF upload, multi-page camera scan (up to 24 pages), direct text input  
-**Output:** Simplified EasyRead summaries (Spanish) with key terms, original text preserved, text-to-speech
+**Input:** PDF upload, multi-page camera scan (up to 24 pages), direct text input  
+**Output:** Simplified EasyRead summaries with key terms, original text preserved, text-to-speech playback
 
 ---
 
-## Local Development Setup
+## Features
+
+- **Document Import** — PDF, multi-page camera scan, or plain text
+- **EasyRead Conversion** — GPT-4o simplifies into short sentences with highlighted key terms
+- **Cloud Sync** — documents stored in PostgreSQL, accessible after login on any device
+- **Offline Cache** — processed chunks cached locally for offline reading
+- **Previous Files** — full document history per user account
+- **Text-to-Speech** — read EasyRead content aloud
+- **Bilingual UI** — full English and Spanish interface
+- **Accessibility** — adjustable text size (small / medium / large / x-large), light/dark theme
+- **Authentication** — sign up / sign in with email and password, password reset via email
+
+---
+
+## Repository Structure
+
+```
+DisabilityApp/
+├── backend/              # Node.js/Express API (port 4000)
+│   ├── server.mjs        # API routes and request handling
+│   ├── db.mjs            # PostgreSQL connection and schema init
+│   ├── openaiClient.mjs  # GPT-4o OCR and EasyRead generation
+│   ├── textUtils.mjs     # Text chunking and normalization
+│   ├── authMiddleware.mjs # JWT verification middleware
+│   ├── Dockerfile        # Production container image
+│   └── .env.example      # Environment variable reference
+├── mobile/               # Expo React Native app
+│   ├── src/
+│   │   ├── screens/      # LoginScreen, ImportScreen, ReaderScreen, etc.
+│   │   ├── context/      # AuthContext, DocumentContext, SettingsContext
+│   │   ├── api.js        # Backend API client
+│   │   └── utils/        # Translations, helpers
+│   ├── app.config.js     # Expo config (reads EXPO_PUBLIC_BACKEND_URL)
+│   ├── eas.json          # EAS Build profiles
+│   └── .env.example      # Mobile environment variable reference
+├── infra/
+│   └── nginx/            # nginx config templates for EC2
+├── docker-compose.yml    # Runs backend + PostgreSQL together
+└── README.md
+```
+
+---
+
+## Local Development
 
 ### Prerequisites
 
 - Node.js 20 or 22
-- Docker Desktop (for local PostgreSQL)
+- Docker Desktop
 - OpenAI API key — [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+- Gmail account with 2FA enabled (for password reset emails)
 
-### 1. Start PostgreSQL with Docker
+### 1. Start PostgreSQL
 
 ```bash
 docker run --name clarodoc-pg \
@@ -36,30 +85,27 @@ docker run --name clarodoc-pg \
   -d postgres:15
 ```
 
-To stop/start after initial setup:
-```bash
-docker stop clarodoc-pg
-docker start clarodoc-pg
-```
+After initial setup, use `docker start clarodoc-pg` / `docker stop clarodoc-pg`.
 
-### 2. Backend Setup
+### 2. Backend
 
 ```bash
 cd backend
 npm install
 ```
 
-Create `backend/.env`:
+Create `backend/.env` (see `backend/.env.example` for all options):
+
 ```env
 NODE_ENV=development
 PORT=4000
-OPENAI_API_KEY=your-openai-key
 
-JWT_SECRET=your-secret-here
+OPENAI_API_KEY=sk-...
 
-# Gmail SMTP — required for password reset emails
-GMAIL_USER=your-gmail@gmail.com
-GMAIL_APP_PASSWORD=your-16-char-app-password
+JWT_SECRET=        # openssl rand -hex 32
+
+GMAIL_USER=you@gmail.com
+GMAIL_APP_PASSWORD=xxxx xxxx xxxx xxxx
 
 DB_HOST=localhost
 DB_PORT=5432
@@ -68,24 +114,15 @@ DB_USER=postgres
 DB_PASSWORD=localpassword
 ```
 
-Generate a secure `JWT_SECRET`:
-```bash
-openssl rand -hex 32
-```
+**Gmail App Password:** enable 2-Step Verification at [myaccount.google.com](https://myaccount.google.com), then create an App Password at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords).
 
-**Gmail App Password setup** (required for password reset):
-1. Enable 2-Step Verification on your Google Account: myaccount.google.com → Security → 2-Step Verification
-2. Create an App Password: myaccount.google.com/apppasswords → App name: `ClaroDoc` → copy the 16-character password
-3. Set `GMAIL_USER` to your Gmail address and `GMAIL_APP_PASSWORD` to the copied password (no spaces)
-
-Start the backend:
 ```bash
 npm run dev
 ```
 
-The server connects to PostgreSQL on startup and creates the `users`, `documents`, and `chunks` tables automatically.
+Tables (`users`, `documents`, `chunks`) are created automatically on first startup.
 
-### 3. Mobile App Setup
+### 3. Mobile App
 
 ```bash
 cd mobile
@@ -93,185 +130,122 @@ npm install
 ```
 
 Create `mobile/.env`:
+
 ```env
 EXPO_PUBLIC_BACKEND_URL=http://localhost:4000
 ```
 
-For a **physical device** on the same Wi-Fi, replace `localhost` with your Mac's LAN IP:
+For a **physical device** on the same Wi-Fi, use your machine's LAN IP instead of `localhost`:
 ```bash
 ipconfig getifaddr en0
-# e.g. EXPO_PUBLIC_BACKEND_URL=http://192.168.1.42:4000
 ```
 
-Start the mobile app:
 ```bash
-npm run start:clean   # clears Metro cache, required after .env changes
+npm run start:clean   # always use after .env changes
 ```
 
-Then press `w` for web browser, `i` for iOS simulator, or scan the QR code with Expo Go.
+Press `w` for web, `i` for iOS simulator, or scan the QR code with Expo Go.
 
----
-
-## Running
+### Running Both Together
 
 | Terminal | Command |
 |---|---|
-| 1 — Backend | `cd backend && npm run dev` |
-| 2 — Mobile | `cd mobile && npm run start:clean` |
+| 1 — PostgreSQL | `docker start clarodoc-pg` |
+| 2 — Backend | `cd backend && npm run dev` |
+| 3 — Mobile | `cd mobile && npm run start:clean` |
 
-After restarting your machine:
-```bash
-docker start clarodoc-pg   # restart PostgreSQL first
-```
+---
+
+## EC2 Deployment
+
+The `aws_deploy` branch is configured for AWS EC2 with Docker Compose (backend + PostgreSQL), nginx serving the web frontend, and S3 for file storage.
+
+See the full step-by-step guide: [docs/deploy-ec2.md](docs/deploy-ec2.md)
+
+**Quick summary of the running stack:**
+- Docker Compose runs PostgreSQL and the Node.js backend on the EC2 host
+- nginx serves the Expo web build as a static SPA on port 80
+- nginx also proxies `/api` traffic to the backend (port 3000) when accessed via the ALB hostname
+- S3 stores uploaded files (PDFs, images, plain text); accessed via EC2 IAM instance profile — no access keys needed
 
 ---
 
 ## Database
 
-Documents and chunks are stored in PostgreSQL. To inspect:
+Tables are created automatically by `initDb()` on backend startup.
+
+| Table | Purpose |
+|---|---|
+| `users` | One row per registered user; bcrypt-hashed passwords; reset token fields |
+| `documents` | One row per document, scoped to `user_id`; stores S3 key and bucket |
+| `chunks` | One row per chunk; `easyread_json` is null until first read, then cached permanently |
 
 ```bash
-# Connect to local DB
+# Inspect local DB
 docker exec -it clarodoc-pg psql -U postgres -d disabilityapp
 
-# Useful queries
-SELECT user_id, email, created_at FROM users;
-SELECT doc_id, title, created_at FROM documents;
-SELECT doc_id, chunk_index, heading FROM chunks;
-\q
+# Inspect EC2 DB (Docker Compose)
+docker exec -it disabilityapp-db-1 psql -U postgres -d disabilityapp
 ```
 
-**`users` table** — one row per registered user; passwords stored as bcrypt hashes; `reset_token` (bcrypt-hashed code) and `reset_expires_at` used for password reset flow  
-**`documents` table** — one row per uploaded document, scoped to `user_id`  
-**`chunks` table** — one row per chunk; `easyread_json` is null until first read, then permanently stored
+Useful queries:
+```sql
+SELECT user_id, email, created_at FROM users;
+SELECT doc_id, title, s3_key, created_at FROM documents ORDER BY created_at DESC;
+SELECT doc_id, chunk_index, heading FROM chunks;
+```
 
 ---
 
-## API Endpoints
+## API Reference
 
-All endpoints except `/health`, `/auth/register`, and `/auth/login` require `Authorization: Bearer <access_token>`.
+All endpoints except `/health`, `/auth/register`, and `/auth/login` require:
+```
+Authorization: Bearer <access_token>
+```
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/health` | Health check (no auth) |
+| `GET` | `/health` | Health check — returns `{"ok":true}` |
 | `POST` | `/auth/register` | Create account (email + password) |
 | `POST` | `/auth/login` | Sign in — returns `{ accessToken, email }` |
-| `POST` | `/auth/forgot-password` | Send 6-digit reset code to email (no auth) |
-| `POST` | `/auth/reset-password` | Verify code and set new password (no auth) |
+| `POST` | `/auth/forgot-password` | Send 6-digit reset code to email |
+| `POST` | `/auth/reset-password` | Verify code and set new password |
 | `GET` | `/documents` | List authenticated user's documents |
 | `POST` | `/documents` | Upload document (JSON text, PDF, or images) |
 | `GET` | `/documents/:docId/chunks/:i` | Fetch chunk; generates EasyRead on first access |
 | `DELETE` | `/documents/:docId` | Delete document and all its chunks |
 
----
-
-## Authentication
-
-The app uses **custom JWT authentication** — no external auth service required. Users register with email and password; passwords are hashed with bcrypt and stored in the `users` PostgreSQL table. On sign-in, a signed JWT (7-day expiry) is returned and stored securely on-device (SecureStore on native, AsyncStorage on web).
-
-Auth screens: Login → Sign Up → App  
-**Password reset:** user taps "Forgot password" → enters email → receives a 6-digit code by email (valid 15 minutes) → enters code + new password → redirected to Login. Reset codes are bcrypt-hashed before storage; plaintext is never saved.
-
----
-
-## Features
-
-- **Authentication** — Sign up and sign in with email/password (custom JWT, self-contained)
-- **Document Import** — PDF upload, multi-page camera scan, direct text input
-- **EasyRead Conversion** — GPT-4o simplifies text into short sentences with key terms
-- **Cloud Sync** — Documents stored in PostgreSQL, accessible across devices after login
-- **Offline Cache** — Processed chunks cached locally for offline reading
-- **Previous Files** — Full document history per user account
-- **Text-to-Speech** — Read EasyRead content aloud
-- **Bilingual UI** — Full English and Spanish interface
-- **Accessibility** — Adjustable text size (small / medium / large / x-large), light/dark theme
-
----
-
-## Production Deployment (AWS)
-
-| Service | Purpose |
-|---|---|
-| AWS App Runner | Backend hosting (auto-scaling, 1 vCPU / 2 GB RAM) |
-| Amazon RDS PostgreSQL | Persistent database (`db.t3.micro`) |
-| AWS Secrets Manager | OpenAI key, JWT secret, and DB credentials |
-| EAS Build | Mobile app builds for iOS and Android |
-
-### Step 1: Create RDS PostgreSQL
-
-1. AWS Console → **RDS** → **Create database**
-2. Engine: **PostgreSQL 15**, Template: **Free tier**
-3. DB name: `disabilityapp`, username: `postgres`, choose a strong password
-4. Connectivity: enable **Public access** initially (lock down with VPC security groups later)
-5. Note down the **endpoint URL** after creation
-
-### Step 2: Push Backend to ECR
-
-```bash
-# Authenticate Docker with ECR (replace region and account ID)
-aws ecr get-login-password --region us-east-2 | \
-  docker login --username AWS --password-stdin \
-  YOUR_ACCOUNT_ID.dkr.ecr.us-east-2.amazonaws.com
-
-# Create repository
-aws ecr create-repository --repository-name clarodoc-backend --region us-east-2
-
-# Build and push (from the backend/ directory)
-cd backend
-docker build --platform linux/amd64 -t clarodoc-backend .
-docker tag clarodoc-backend:latest \
-  YOUR_ACCOUNT_ID.dkr.ecr.us-east-2.amazonaws.com/clarodoc-backend:latest
-docker push \
-  YOUR_ACCOUNT_ID.dkr.ecr.us-east-2.amazonaws.com/clarodoc-backend:latest
-```
-
-### Step 3: Create App Runner Service
-
-1. AWS Console → **App Runner** → **Create service**
-2. Source: **Container registry → Amazon ECR** → select `clarodoc-backend`
-3. Deployment trigger: **Automatic**
-4. Port: **4000**, CPU: **1 vCPU**, Memory: **2 GB**
-5. Add environment variables:
-
-| Key | Value |
-|---|---|
-| `NODE_ENV` | `production` |
-| `OPENAI_API_KEY` | your OpenAI key |
-| `JWT_SECRET` | output of `openssl rand -hex 32` |
-| `GMAIL_USER` | Gmail address used to send reset emails |
-| `GMAIL_APP_PASSWORD` | 16-character Gmail App Password |
-| `DB_HOST` | your RDS endpoint |
-| `DB_PORT` | `5432` |
-| `DB_NAME` | `disabilityapp` |
-| `DB_USER` | `postgres` |
-| `DB_PASSWORD` | your RDS password |
-
-6. Note down the App Runner URL (e.g. `https://xxxx.us-east-2.awsapprunner.com`)
-
-> Database tables are created automatically on first backend startup — no manual SQL needed.
-
-### Step 4: Update Mobile Config
-
-In `mobile/eas.json`, replace the placeholder URL in all three build profiles:
+**POST /documents** accepts three input types:
 
 ```json
-"EXPO_PUBLIC_BACKEND_URL": "https://xxxx.us-east-2.awsapprunner.com"
+{ "inputType": "text", "title": "...", "language": "es", "text": "..." }
+```
+```json
+{ "inputType": "pdf",  "title": "...", "language": "es" }
+// multipart/form-data with file field
+```
+```json
+{ "inputType": "image", "title": "...", "language": "es", "imagePages": ["base64...", ...] }
 ```
 
-### Step 5: Build and Submit Mobile App
+---
+
+## EAS Mobile Builds
+
+Build profiles are defined in `mobile/eas.json`. Update `EXPO_PUBLIC_BACKEND_URL` in each profile to point to your backend before building.
 
 ```bash
 cd mobile
 
-# Internal testing build (Android APK + iOS)
-eas build --profile preview --platform all
+# Internal testing APK (Android)
+eas build --profile preview --platform android
 
-# Production build for App Store / Play Store
+# Production build
 eas build --profile production --platform all
 
-# Submit to stores
+# Submit to Google Play (internal track)
 eas submit --profile production --platform android
-eas submit --profile production --platform ios
 ```
 
 ---
@@ -283,14 +257,19 @@ eas submit --profile production --platform ios
 kill -9 $(lsof -ti:4000)
 ```
 
-**Documents not saving to database:**
-- Ensure `EXPO_PUBLIC_BACKEND_URL` is explicitly set in `mobile/.env`
-- Restart Expo with `npm run start:clean` after any `.env` change
+**Backend not connecting to PostgreSQL:**
+- Ensure the Docker container is running: `docker ps`
+- Check `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` in `.env`
+
+**Mobile app can't reach backend on physical device:**
+- Use your machine's LAN IP (`ipconfig getifaddr en0`), not `localhost`
+- Phone and Mac must be on the same Wi-Fi network
+- Always run `npm run start:clean` after changing `.env`
 
 **PDF upload fails:**
-- Scanned/image-based PDFs are not supported — use camera scan mode instead
+- Scanned/image-only PDFs are not supported — use camera scan mode instead
 - Text-based PDFs must contain at least 200 characters of extractable text
 
-**Cannot connect to backend on physical device:**
-- Use your Mac's LAN IP (`ipconfig getifaddr en0`), not `localhost`
-- Mac and phone must be on the same Wi-Fi network
+**EasyRead generation is slow:**
+- GPT-4o is called once per chunk on first read, then permanently cached
+- Long documents (many chunks) take longer on first open; subsequent reads are instant
