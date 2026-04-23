@@ -18,7 +18,7 @@ ClaroDoc converts complex legal and medical documents into **EasyRead format** â
 
 | Branch | Description |
 |---|---|
-| **`main`** (this branch) | Web page application [Link] (https://clarodoc.digital/) |
+| **`main`** (this branch) | Web page application: [Link](https://clarodoc.digital/) |
 | **`aws_deploy`** | AWS EC2 deployment â€” Docker Compose, nginx, S3, and full deployment guide |
 
 > For AWS deployment instructions, switch to the [`aws_deploy`](../../tree/aws_deploy) branch and follow [docs/deploy-ec2.md](../../blob/aws_deploy/docs/deploy-ec2.md).
